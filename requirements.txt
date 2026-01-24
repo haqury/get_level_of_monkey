@@ -1,0 +1,10 @@
+# Game Engine
+panda3d>=1.10.13
+
+# For Shared Memory integration with BrainLink
+# (multiprocessing is built-in to Python)
+
+# Utilities
+dataclasses-json>=0.6.0  # JSON serialization for dataclasses
+Pillow>=12.0.0  # Image processing for sprite generation
+pyautogui>=0.9.54  # Screenshot functionality
