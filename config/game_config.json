@@ -19,7 +19,8 @@
     "check_interval": 0.016,
     "send_keyboard_events": true,
     "send_to_history": true,
-    "send_to_ml": false
+    "send_to_ml": true,
+    "send_brainlink_events": true
   },
   "controls": {
     "keyboard": {

@@ -74,9 +74,11 @@ class InputManager(DirectObject):
         # Track if BrainLink is being used
         self._is_using_brainlink = False
         
-        # Keyboard event tracking for sending to BrainLink
+        # Event tracking for sending to BrainLink
         self.last_keyboard_event = ""
+        self.last_brainlink_event_sent = ""
         self.send_keyboard_events = False
+        self.send_brainlink_events = False
         self.send_to_history = False
         self.send_to_ml = False
         
@@ -84,6 +86,7 @@ class InputManager(DirectObject):
         if hasattr(base, 'game_config'):
             bl_config = base.game_config.get("brainlink", {})
             self.send_keyboard_events = bl_config.get("send_keyboard_events", False)
+            self.send_brainlink_events = bl_config.get("send_brainlink_events", True)  # Default: enabled
             self.send_to_history = bl_config.get("send_to_history", False)
             self.send_to_ml = bl_config.get("send_to_ml", False)
         
@@ -150,6 +153,16 @@ class InputManager(DirectObject):
             if bl_event != self.last_bl_event:
                 logger.debug(f"🧠 BrainLink event: {bl_event}")
                 self.last_bl_event = bl_event
+                
+                # Send BrainLink events to ML training if enabled
+                if self.send_brainlink_events and bl_event and bl_event != "stop":
+                    if bl_event != self.last_brainlink_event_sent and self.brainlink:
+                        if self.send_to_ml:
+                            self.brainlink.send_event_for_ml_training(bl_event)
+                            logger.debug(f"📤 Sent BrainLink event '{bl_event}' for ML training")
+                        if self.send_to_history:
+                            self.brainlink.send_event_to_history(bl_event)
+                        self.last_brainlink_event_sent = bl_event
         
         # Fallback to keyboard if no BrainLink event
         else:

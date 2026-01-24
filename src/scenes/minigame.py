@@ -517,9 +517,13 @@ class MinigameScene(BaseScene):
                 self.poops.remove(poop)
                 poop.cleanup()
                 
+                # Send event to BrainLink for ML training (damage taken)
+                self._send_game_event("damage_taken")
+                
                 # Check game over
                 if not self.base.health_system.is_alive():
                     self._game_over()
+                    self._send_game_event("player_died")
             
             # Remove dead poops (player dodged!)
             elif not poop.is_alive:
@@ -527,6 +531,10 @@ class MinigameScene(BaseScene):
                 if hasattr(self.base, 'progression_system'):
                     xp_per_dodge = self.balance.get("progression", {}).get("xp_per_dodge", 5)
                     self.base.progression_system.add_xp(xp_per_dodge, "dodge")
+                
+                # Send event to BrainLink for ML training (successful dodge)
+                self._send_game_event("dodge_success")
+                
                 self.poops.remove(poop)
                 poop.cleanup()
     
@@ -539,7 +547,59 @@ class MinigameScene(BaseScene):
         if hasattr(self.base, 'save_system'):
             self.base.save_system.save_minigame_time(self.game_time)
         
+        # Send event to BrainLink for ML training (game over)
+        self._send_game_event("game_over")
+        
         # TODO: Show game over screen
+    
+    def _send_game_event(self, event_name: str):
+        """
+        Send game event to BrainLink for ML training
+        
+        When a game event occurs (damage, dodge, etc.), we send the current
+        movement event to BrainLink so the ML model can learn which movements
+        lead to success or failure.
+        
+        Args:
+            event_name: Event name (e.g., "damage_taken", "dodge_success", "player_died")
+        """
+        try:
+            # Get BrainLink client from input manager
+            if not hasattr(self.base, 'input_manager') or not self.base.input_manager.brainlink:
+                return
+            
+            brainlink = self.base.input_manager.brainlink
+            
+            # Check if ML training is enabled in config
+            if not hasattr(self.base, 'game_config'):
+                return
+            
+            bl_config = self.base.game_config.get("brainlink", {})
+            if not bl_config.get("send_to_ml", False):
+                return
+            
+            # Get current movement event from BrainLink
+            # This is the movement the player was thinking/doing when the game event occurred
+            current_event = brainlink.get_event()
+            
+            if current_event and current_event in ["ml", "mr", "mu", "md"]:
+                # Send movement event for ML training
+                # The ML model will learn: "When player thought X, game event Y happened"
+                success = brainlink.send_event_for_ml_training(current_event)
+                if success:
+                    logger.debug(f"📤 Sent '{event_name}' -> ML training: movement '{current_event}'")
+                else:
+                    logger.debug(f"⚠️ Failed to send '{event_name}' for ML training")
+            else:
+                # If no current movement event, check if player is using keyboard
+                # In that case, we can't send ML training data (no EEG data available)
+                if not self.base.input_manager.is_using_brainlink():
+                    logger.debug(f"⚠️ Cannot send '{event_name}' for ML: player using keyboard (no BrainLink)")
+                else:
+                    logger.debug(f"⚠️ Cannot send '{event_name}' for ML: no active movement event")
+        
+        except Exception as e:
+            logger.warning(f"Error sending game event to BrainLink: {e}", exc_info=True)
     
     def exit(self):
         """Exit minigame"""
