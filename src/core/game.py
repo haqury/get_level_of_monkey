@@ -138,8 +138,8 @@ class Game(ShowBase):
         """Get default configuration"""
         return {
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
-            "player": {"initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 1.0, "move_cost": 2, "move_speed": 10},
-            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016},
+            "player": {"initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 10},
+            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False},
             "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space"}}
         }
     
@@ -626,8 +626,20 @@ class Game(ShowBase):
                         move_dir = (0, move_dir[1])  # Only vertical movement
                 
                 if move_dir != (0, 0):
-                    # Try to spend energy
-                    if self.energy_system.spend(self.move_cost * dt):
+                    # Only spend energy if using keyboard (not BrainLink)
+                    should_spend_energy = not self.input_manager.is_using_brainlink()
+                    
+                    # Try to spend energy (only for keyboard movement)
+                    if should_spend_energy:
+                        if self.energy_system.spend(self.move_cost * dt):
+                            # Get movement bounds from current scene if in minigame
+                            bounds = None
+                            if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
+                                bounds = current_scene.MOVEMENT_BOUNDS
+                            # Check collisions before moving
+                            self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
+                    else:
+                        # BrainLink movement - no energy cost, just move
                         # Get movement bounds from current scene if in minigame
                         bounds = None
                         if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):

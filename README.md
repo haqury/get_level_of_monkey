@@ -1,4 +1,4 @@
-# 🎮 Fucking Pickup
+# 🎮 get_level_of_monkey
 
 2D Action игра с видом сверху на движке **Panda3D** с интеграцией **BrainLink** через Shared Memory!
 

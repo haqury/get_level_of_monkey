@@ -22,6 +22,8 @@ CODE_TO_EVENT = {
     5: "stop",  # Stop
 }
 
+EVENT_TO_CODE = {v: k for k, v in CODE_TO_EVENT.items()}
+
 
 class BrainLinkClient:
     """
@@ -32,6 +34,12 @@ class BrainLinkClient:
     
     # Memory offsets (must match BrainLink Client)
     EVENT_CODE = 13  # offset for event code
+    
+    # Command fields (for sending events back to BrainLink)
+    COMMAND_PENDING = 21
+    COMMAND_TYPE = 22
+    COMMAND_EVENT_CODE = 23
+    COMMAND_TIMESTAMP = 24
     
     def __init__(self, memory_name: str = "brainlink_data"):
         """
@@ -94,6 +102,20 @@ class BrainLinkClient:
         byte_offset = offset * 4
         return struct.unpack('i', self.shm.buf[byte_offset:byte_offset + 4])[0]
     
+    def _write_int(self, offset: int, value: int):
+        """
+        Write int32 to shared memory
+        
+        Args:
+            offset: Field offset (in int32 units)
+            value: Value to write
+        """
+        if not self.shm:
+            return
+        
+        byte_offset = offset * 4
+        self.shm.buf[byte_offset:byte_offset + 4] = struct.pack('i', value)
+    
     def get_event(self) -> str:
         """
         Get current event from BrainLink (ultra-fast!)
@@ -114,6 +136,96 @@ class BrainLinkClient:
     def is_connected(self) -> bool:
         """Check if connected to BrainLink"""
         return self.connected
+    
+    def send_event_to_history(self, event_name: str) -> bool:
+        """
+        Send event to BrainLink Client to save in history
+        
+        Args:
+            event_name: Event name ("ml", "mr", "mu", "md", "stop")
+        
+        Returns:
+            True if command sent successfully
+        """
+        if not self.connected:
+            logger.warning("Cannot send event: not connected to BrainLink")
+            return False
+        
+        try:
+            import time
+            
+            # Convert event name to code
+            event_code = EVENT_TO_CODE.get(event_name, 0)
+            if event_code == 0:
+                logger.warning(f"Unknown event name: {event_name}")
+                return False
+            
+            # Check if previous command is still pending
+            if self._read_int(self.COMMAND_PENDING) == 1:
+                # Wait a bit for previous command to be processed
+                time.sleep(0.001)  # 1ms
+                if self._read_int(self.COMMAND_PENDING) == 1:
+                    logger.debug("Previous command still pending, skipping")
+                    return False
+            
+            # Write command
+            timestamp = int(time.time() * 1000)  # milliseconds
+            self._write_int(self.COMMAND_TYPE, 1)  # 1 = save to history
+            self._write_int(self.COMMAND_EVENT_CODE, event_code)
+            self._write_int(self.COMMAND_TIMESTAMP, timestamp)
+            self._write_int(self.COMMAND_PENDING, 1)  # Mark as pending
+            
+            logger.debug(f"📤 Sent event to history: {event_name} (code: {event_code})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending event to history: {e}")
+            return False
+    
+    def send_event_for_ml_training(self, event_name: str) -> bool:
+        """
+        Send event to BrainLink Client for ML training
+        
+        Args:
+            event_name: Event name ("ml", "mr", "mu", "md", "stop")
+        
+        Returns:
+            True if command sent successfully
+        """
+        if not self.connected:
+            logger.warning("Cannot send event: not connected to BrainLink")
+            return False
+        
+        try:
+            import time
+            
+            # Convert event name to code
+            event_code = EVENT_TO_CODE.get(event_name, 0)
+            if event_code == 0:
+                logger.warning(f"Unknown event name: {event_name}")
+                return False
+            
+            # Check if previous command is still pending
+            if self._read_int(self.COMMAND_PENDING) == 1:
+                # Wait a bit for previous command to be processed
+                time.sleep(0.001)  # 1ms
+                if self._read_int(self.COMMAND_PENDING) == 1:
+                    logger.debug("Previous command still pending, skipping")
+                    return False
+            
+            # Write command
+            timestamp = int(time.time() * 1000)  # milliseconds
+            self._write_int(self.COMMAND_TYPE, 2)  # 2 = save for ML training
+            self._write_int(self.COMMAND_EVENT_CODE, event_code)
+            self._write_int(self.COMMAND_TIMESTAMP, timestamp)
+            self._write_int(self.COMMAND_PENDING, 1)  # Mark as pending
+            
+            logger.debug(f"🤖 Sent event for ML training: {event_name} (code: {event_code})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending event for ML training: {e}")
+            return False
 
 
 # Singleton instance
