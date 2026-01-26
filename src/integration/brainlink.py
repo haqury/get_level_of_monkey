@@ -99,8 +99,13 @@ class BrainLinkClient:
         if not self.shm:
             return 0
         
-        byte_offset = offset * 4
-        return struct.unpack('i', self.shm.buf[byte_offset:byte_offset + 4])[0]
+        try:
+            byte_offset = offset * 4
+            value = struct.unpack('i', self.shm.buf[byte_offset:byte_offset + 4])[0]
+            return value
+        except Exception as e:
+            logger.error(f"Error reading int from shared memory (offset={offset}): {e}", exc_info=True)
+            return 0
     
     def _write_int(self, offset: int, value: int):
         """
@@ -108,10 +113,22 @@ class BrainLinkClient:
         
         Args:
             offset: Field offset (in int32 units)
-            value: Value to write
+            value: Value to write (will be clamped to int32 range if needed)
         """
         if not self.shm:
             return
+        
+        # Clamp value to int32 range to prevent "argument out of range" error
+        # int32 range: -2,147,483,648 to 2,147,483,647
+        INT32_MAX = 2147483647
+        INT32_MIN = -2147483648
+        
+        if value > INT32_MAX:
+            logger.warning(f"Value {value} exceeds int32 max, clamping to {INT32_MAX}")
+            value = INT32_MAX
+        elif value < INT32_MIN:
+            logger.warning(f"Value {value} below int32 min, clamping to {INT32_MIN}")
+            value = INT32_MIN
         
         byte_offset = offset * 4
         self.shm.buf[byte_offset:byte_offset + 4] = struct.pack('i', value)
@@ -124,13 +141,56 @@ class BrainLinkClient:
             Event name: "ml", "mr", "mu", "md", "stop", or "" (no event)
         """
         if not self.connected:
+            # Log disconnection periodically
+            if not hasattr(self, '_disconnect_log_counter'):
+                self._disconnect_log_counter = 0
+            self._disconnect_log_counter += 1
+            if self._disconnect_log_counter % 300 == 0:  # Log every 5 seconds at 60fps
+                logger.warning(f"🎮 BrainLink: Not connected (counter: {self._disconnect_log_counter})")
             return ""
         
         try:
             event_code = self._read_int(self.EVENT_CODE)
-            return CODE_TO_EVENT.get(event_code, "")
+            event_name = CODE_TO_EVENT.get(event_code, "")
+            
+            # Log event changes for debugging (only occasionally to avoid spam)
+            if not hasattr(self, '_last_logged_event'):
+                self._last_logged_event = ""
+                self._event_log_counter = 0
+                self._empty_read_counter = 0
+                logger.info(f"🎮 BrainLink: Starting to read events from shared memory (memory_name: {self.memory_name})")
+                # Log first read to verify connection
+                logger.info(f"🎮 BrainLink: First read - event_code={event_code}, event_name='{event_name}'")
+            
+            self._event_log_counter += 1
+            if event_name != self._last_logged_event:
+                if event_code != 0:  # Only log non-empty events
+                    logger.info(f"🎮 Game read event: {event_name} (code: {event_code})")
+                elif event_name == "" and self._last_logged_event != "":
+                    logger.info(f"🎮 Game: Event cleared (was: '{self._last_logged_event}')")
+                self._last_logged_event = event_name
+            elif self._event_log_counter % 100 == 0 and event_code != 0:  # Log every 100 reads
+                logger.info(f"🎮 Game reading event: {event_name} (code: {event_code}) - still active")
+            elif self._event_log_counter == 10:  # Log 10th read to verify we're reading
+                logger.info(f"🎮 BrainLink: 10th read - event_code={event_code}, event_name='{event_name}'")
+            
+            # Log if we're consistently getting empty events (periodically)
+            if event_code == 0 or event_name == "":
+                self._empty_read_counter += 1
+                if self._empty_read_counter == 1:  # Log first empty read
+                    logger.info(f"🎮 BrainLink: Reading event_code=0 (empty) - waiting for events...")
+                elif self._empty_read_counter == 60:  # Log after 1 second at 60fps
+                    logger.info(f"🎮 BrainLink: Still reading event_code=0 (empty) after 1 second (counter: {self._empty_read_counter})")
+                elif self._empty_read_counter % 300 == 0:  # Log every 5 seconds at 60fps
+                    logger.info(f"🎮 BrainLink: Reading event_code=0 (empty) consistently (counter: {self._empty_read_counter})")
+            else:
+                if self._empty_read_counter > 0:
+                    logger.info(f"🎮 BrainLink: Event received after {self._empty_read_counter} empty reads: {event_name} (code: {event_code})")
+                self._empty_read_counter = 0
+            
+            return event_name
         except Exception as e:
-            logger.error(f"Error reading event: {e}")
+            logger.error(f"Error reading event: {e}", exc_info=True)
             return ""
     
     def is_connected(self) -> bool:
@@ -169,10 +229,15 @@ class BrainLinkClient:
                     return False
             
             # Write command
-            timestamp = int(time.time() * 1000)  # milliseconds
+            # Use relative timestamp (milliseconds since game start) to avoid int32 overflow
+            # Absolute timestamp would be too large for int32
+            if not hasattr(self, '_start_time'):
+                self._start_time = time.time()
+            relative_timestamp = int((time.time() - self._start_time) * 1000)  # milliseconds since start
+            
             self._write_int(self.COMMAND_TYPE, 1)  # 1 = save to history
             self._write_int(self.COMMAND_EVENT_CODE, event_code)
-            self._write_int(self.COMMAND_TIMESTAMP, timestamp)
+            self._write_int(self.COMMAND_TIMESTAMP, relative_timestamp)
             self._write_int(self.COMMAND_PENDING, 1)  # Mark as pending
             
             logger.debug(f"📤 Sent event to history: {event_name} (code: {event_code})")
@@ -214,10 +279,15 @@ class BrainLinkClient:
                     return False
             
             # Write command
-            timestamp = int(time.time() * 1000)  # milliseconds
+            # Use relative timestamp (milliseconds since game start) to avoid int32 overflow
+            # Absolute timestamp would be too large for int32
+            if not hasattr(self, '_start_time'):
+                self._start_time = time.time()
+            relative_timestamp = int((time.time() - self._start_time) * 1000)  # milliseconds since start
+            
             self._write_int(self.COMMAND_TYPE, 2)  # 2 = save for ML training
             self._write_int(self.COMMAND_EVENT_CODE, event_code)
-            self._write_int(self.COMMAND_TIMESTAMP, timestamp)
+            self._write_int(self.COMMAND_TIMESTAMP, relative_timestamp)
             self._write_int(self.COMMAND_PENDING, 1)  # Mark as pending
             
             logger.debug(f"🤖 Sent event for ML training: {event_name} (code: {event_code})")

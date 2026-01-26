@@ -18,7 +18,7 @@ class CaveScene(BaseScene):
         self._create_background()
         
         # Create father NPC
-        father = Father(base, pos=(-10, 0))  # Adjusted for smaller room
+        father = Father(base, pos=(-10, 10))  # Positioned higher in the room
         self.npcs.append(father)
         
         # Create exits - positioned on walls

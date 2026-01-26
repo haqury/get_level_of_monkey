@@ -34,6 +34,7 @@ class InputManager(DirectObject):
         
         # BrainLink client
         self.brainlink: Optional[BrainLinkClient] = None
+        logger.info(f"🎮 InputManager: brainlink_enabled={brainlink_enabled}")
         if brainlink_enabled:
             from src.integration import get_brainlink_client
             # Try default name first
@@ -44,10 +45,17 @@ class InputManager(DirectObject):
                     memory_name = base.brainlink_launcher._found_memory_name
                     logger.info(f"Using found memory name: {memory_name}")
             
+            logger.info(f"🎮 InputManager: Getting BrainLink client (memory_name: {memory_name})")
             self.brainlink = get_brainlink_client(memory_name)
+            logger.info(f"🎮 InputManager: BrainLink client created: {self.brainlink is not None}")
+            logger.info(f"🎮 InputManager: Attempting to connect to BrainLink (memory_name: {memory_name})")
             if not self.brainlink.connect():
-                logger.warning("BrainLink not available, using keyboard only")
+                logger.warning("🎮 InputManager: BrainLink not available, using keyboard only")
                 self.brainlink_enabled = False
+            else:
+                logger.info("🎮 InputManager: BrainLink connected successfully!")
+        else:
+            logger.info("🎮 InputManager: BrainLink disabled in config")
         
         # Current input state
         self.move_direction = (0, 0)  # (x, y)
@@ -90,7 +98,7 @@ class InputManager(DirectObject):
             self.send_to_history = bl_config.get("send_to_history", False)
             self.send_to_ml = bl_config.get("send_to_ml", False)
         
-        logger.info(f"InputManager initialized (BrainLink: {brainlink_enabled}, send_keyboard: {self.send_keyboard_events})")
+        logger.info(f"🎮 InputManager initialized (BrainLink: {brainlink_enabled}, send_keyboard: {self.send_keyboard_events}, brainlink_obj: {self.brainlink is not None})")
     
     def _setup_keyboard(self):
         """Setup keyboard event handlers"""
@@ -131,27 +139,73 @@ class InputManager(DirectObject):
         # Get BrainLink input (if enabled)
         bl_event = ""
         if self.brainlink_enabled and self.brainlink:
-            bl_event = self.brainlink.get_event()
+            if not self.brainlink.is_connected():
+                # Try to reconnect
+                if not hasattr(self, '_reconnect_logged'):
+                    logger.warning("🎮 InputManager: BrainLink disconnected, attempting reconnect...")
+                    self._reconnect_logged = True
+                self.brainlink.connect()
+            else:
+                if hasattr(self, '_reconnect_logged'):
+                    self._reconnect_logged = False
+                bl_event = self.brainlink.get_event()
+                # Log every event read (for debugging)
+                if bl_event and bl_event != self.last_bl_event:
+                    logger.info(f"🎮 InputManager: BrainLink event read: '{bl_event}'")
+                # Also log if we're reading but getting empty events (periodically)
+                if not hasattr(self, '_empty_event_counter'):
+                    self._empty_event_counter = 0
+                if not bl_event or bl_event == "":
+                    self._empty_event_counter += 1
+                    if self._empty_event_counter % 300 == 0:  # Log every 5 seconds at 60fps
+                        logger.debug(f"🎮 InputManager: Reading from BrainLink but getting empty events (counter: {self._empty_event_counter})")
+                else:
+                    self._empty_event_counter = 0
+        else:
+            # BrainLink not enabled or not available
+            if not hasattr(self, '_brainlink_disabled_logged'):
+                logger.info(f"🎮 InputManager: BrainLink disabled or not available (enabled={self.brainlink_enabled}, brainlink={self.brainlink is not None})")
+                self._brainlink_disabled_logged = True
         
         # Calculate movement direction
         x, y = 0, 0
         
-        # BrainLink has priority over keyboard
-        if bl_event:
+        # Keyboard has priority over BrainLink
+        keyboard_event = ""
+        if self.keys["left"]:
+            x -= 1
+            keyboard_event = "ml"
+        elif self.keys["right"]:
+            x += 1
+            keyboard_event = "mr"
+        elif self.keys["up"]:
+            y += 1
+            keyboard_event = "mu"
+        elif self.keys["down"]:
+            y -= 1
+            keyboard_event = "md"
+        
+        # If keyboard is not used, fallback to BrainLink
+        if not keyboard_event and bl_event:
             if bl_event == "ml":  # Move Left
                 x = -1
+                logger.info(f"🎮 InputManager: Applying BrainLink movement LEFT (x={x}, y={y})")
             elif bl_event == "mr":  # Move Right
                 x = 1
+                logger.info(f"🎮 InputManager: Applying BrainLink movement RIGHT (x={x}, y={y})")
             elif bl_event == "mu":  # Move Up
                 y = 1
+                logger.info(f"🎮 InputManager: Applying BrainLink movement UP (x={x}, y={y})")
             elif bl_event == "md":  # Move Down
                 y = -1
+                logger.info(f"🎮 InputManager: Applying BrainLink movement DOWN (x={x}, y={y})")
             elif bl_event == "stop":
                 x, y = 0, 0
+                logger.info(f"🎮 InputManager: Applying BrainLink STOP (x={x}, y={y})")
             
             # Log event changes
             if bl_event != self.last_bl_event:
-                logger.debug(f"🧠 BrainLink event: {bl_event}")
+                logger.info(f"🧠 InputManager: BrainLink event changed: '{self.last_bl_event}' -> '{bl_event}'")
                 self.last_bl_event = bl_event
                 
                 # Send BrainLink events to ML training if enabled
@@ -164,30 +218,14 @@ class InputManager(DirectObject):
                             self.brainlink.send_event_to_history(bl_event)
                         self.last_brainlink_event_sent = bl_event
         
-        # Fallback to keyboard if no BrainLink event
-        else:
-            keyboard_event = ""
-            if self.keys["left"]:
-                x -= 1
-                keyboard_event = "ml"
-            elif self.keys["right"]:
-                x += 1
-                keyboard_event = "mr"
-            elif self.keys["up"]:
-                y += 1
-                keyboard_event = "mu"
-            elif self.keys["down"]:
-                y -= 1
-                keyboard_event = "md"
-            
-            # Send keyboard events to BrainLink if enabled
-            if self.send_keyboard_events and keyboard_event and keyboard_event != self.last_keyboard_event:
-                if self.brainlink:
-                    if self.send_to_history:
-                        self.brainlink.send_event_to_history(keyboard_event)
-                    if self.send_to_ml:
-                        self.brainlink.send_event_for_ml_training(keyboard_event)
-                self.last_keyboard_event = keyboard_event
+        # Send keyboard events to BrainLink if enabled (always, even if BrainLink is active)
+        if self.send_keyboard_events and keyboard_event and keyboard_event != self.last_keyboard_event:
+            if self.brainlink:
+                if self.send_to_history:
+                    self.brainlink.send_event_to_history(keyboard_event)
+                if self.send_to_ml:
+                    self.brainlink.send_event_for_ml_training(keyboard_event)
+            self.last_keyboard_event = keyboard_event
         
         # Normalize diagonal movement
         if x != 0 and y != 0:
@@ -198,8 +236,15 @@ class InputManager(DirectObject):
         self.move_direction = (x, y)
         self.action_pressed = self.keys["space"]
         
-        # Track if BrainLink is being used for movement
-        self._is_using_brainlink = bool(bl_event and bl_event != "stop")
+        # Track if BrainLink is being used for movement (only if keyboard is not used)
+        self._is_using_brainlink = bool(not keyboard_event and bl_event and bl_event != "stop")
+        
+        # Periodic logging for debugging (every 60 frames ~ 1 second at 60fps)
+        if not hasattr(self, '_debug_counter'):
+            self._debug_counter = 0
+        self._debug_counter += 1
+        if self._debug_counter % 60 == 0 and self._is_using_brainlink:
+            logger.info(f"🎮 InputManager: BrainLink active - event='{bl_event}', movement=({x:.2f}, {y:.2f}), keyboard_event='{keyboard_event}'")
     
     def get_movement(self) -> tuple:
         """

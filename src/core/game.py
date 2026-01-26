@@ -611,6 +611,16 @@ class Game(ShowBase):
         # Process movement (only if in game and not in dialog)
         if self.in_game and not self.dialog_box.is_visible:
             move_dir = self.input_manager.get_movement()
+            
+            # Debug logging for BrainLink movement
+            if not hasattr(self, '_movement_debug_counter'):
+                self._movement_debug_counter = 0
+            self._movement_debug_counter += 1
+            
+            is_brainlink = self.input_manager.is_using_brainlink()
+            if is_brainlink and move_dir != (0, 0) and self._movement_debug_counter % 60 == 0:
+                logger.info(f"🎮 Game: BrainLink movement detected - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f})")
+            
             if move_dir != (0, 0):
                 # Get current scene for movement restrictions
                 current_scene = self.scene_manager.get_current_scene()
@@ -645,6 +655,8 @@ class Game(ShowBase):
                         if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
                             bounds = current_scene.MOVEMENT_BOUNDS
                         # Check collisions before moving
+                        if self._movement_debug_counter % 60 == 0:
+                            logger.info(f"🎮 Game: Applying BrainLink movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), speed={self.player_speed}")
                         self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
             
             # Check for automatic scene transitions (exits work automatically)
