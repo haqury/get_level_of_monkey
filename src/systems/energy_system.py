@@ -17,11 +17,14 @@ class EnergySystem:
         self.max_energy = max_energy
         self.current_energy = max_energy
         self.regen_rate = regen_rate
+        self.cheater_mode = False  # Cheater mode: unlimited energy
         
         logger.info(f"EnergySystem: max={max_energy}, regen={regen_rate}/sec")
     
     def can_spend(self, amount: float) -> bool:
         """Проверить, можно ли потратить энергию"""
+        if self.cheater_mode:
+            return True  # Always can spend in cheater mode
         return self.current_energy >= amount
     
     def spend(self, amount: float) -> bool:
@@ -31,6 +34,8 @@ class EnergySystem:
         Returns:
             True if spent successfully
         """
+        if self.cheater_mode:
+            return True  # Always succeed in cheater mode, don't reduce energy
         if self.can_spend(amount):
             self.current_energy -= amount
             return True

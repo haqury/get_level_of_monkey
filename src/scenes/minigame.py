@@ -11,32 +11,43 @@ logger = logging.getLogger(__name__)
 class Monkey:
     """Обезьяна в мини-игре"""
     
-    def __init__(self, base, age: int, pos: tuple, stats: dict):
+    def __init__(self, base, age: int, pos: tuple, stats: dict, walk_direction: str = "horizontal", monkey_mode: str = "NorthSouth"):
         """
         Args:
             base: ShowBase
             age: Возраст обезьяны (1-4)
             pos: Позиция (x, y)
             stats: Характеристики (throw_speed, accuracy, cooldown)
+            walk_direction: "horizontal" or "vertical" - direction along edge
+            monkey_mode: "NorthSouth" or "WestEast" - determines movement pattern
         """
         self.base = base
         self.age = age
         self.position = Vec3(pos[0], 0, pos[1])
         self.stats = stats
+        self.walk_direction = walk_direction
+        self.monkey_mode = monkey_mode
         
         # Throwing state
         self.throw_cooldown = 0
         self.max_cooldown = stats["cooldown"]
         
-        # Movement state - monkeys run around the field
-        self.move_direction = Vec3(
-            random.uniform(-1, 1),
-            0,
-            random.uniform(-1, 1)
-        ).normalized()
-        self.move_speed = random.uniform(2.0, 5.0)  # Random speed for variety
-        self.move_timer = 0.0
-        self.move_change_interval = random.uniform(2.0, 5.0)  # Change direction periodically
+        # Movement state - monkeys walk along forest edge
+        self.move_speed = random.uniform(3.0, 6.0)  # Speed along edge
+        
+        # Set initial movement direction based on mode
+        if monkey_mode == "NorthSouth":
+            # Monkeys walk along top/bottom edge (horizontal movement)
+            # Random direction: left or right
+            direction = random.choice([-1, 1])
+            self.move_direction = Vec3(direction, 0, 0)  # Left or Right
+        else:  # WestEast
+            # Monkeys walk along left/right edge (vertical movement)
+            # Random direction: up or down
+            direction = random.choice([-1, 1])
+            self.move_direction = Vec3(0, 0, direction)  # Up or Down
+        
+        self.move_direction.normalize()
         
         # Visual
         self.node = self._create_visual()
@@ -84,62 +95,77 @@ class Monkey:
         return node
     
     def update(self, dt: float, player_pos: tuple):
-        """Update monkey - move around and throw poop"""
-        # Update movement - monkeys run onto the clearing
-        self.move_timer += dt
-        if self.move_timer >= self.move_change_interval:
-            # Monkeys tend to move toward the clearing (center) or run across it
-            distance_from_center = (self.position.x*self.position.x + self.position.z*self.position.z) ** 0.5
-            
-            if distance_from_center > 20:
-                # Far from clearing - run toward it
-                if distance_from_center > 0:
-                    self.move_direction = Vec3(-self.position.x / distance_from_center, 0, -self.position.z / distance_from_center)
-                else:
-                    self.move_direction = Vec3(0, 0, -1)
-            else:
-                # On or near clearing - run around randomly
-                self.move_direction = Vec3(
-                    random.uniform(-1, 1),
-                    0,
-                    random.uniform(-1, 1)
-                ).normalized()
-            
-            self.move_timer = 0.0
-            self.move_change_interval = random.uniform(1.5, 4.0)
-        
-        # Move monkey
+        """Update monkey - walk along forest edge and throw poop when perpendicular to player"""
+        # Move monkey along edge
         movement = self.move_direction * self.move_speed * dt
         new_x = self.position.x + movement.x
         new_y = self.position.z + movement.z
         
-        # Keep monkeys on the field (can go on clearing or in bushes)
-        distance_from_center = (new_x*new_x + new_y*new_y) ** 0.5
-        if distance_from_center > 40:
-            # Too far, pull back toward center
-            if distance_from_center > 0:
-                self.move_direction = Vec3(-new_x / distance_from_center, 0, -new_y / distance_from_center)
-            else:
-                self.move_direction = Vec3(0, 0, -1)
+        # Keep monkeys on edge - if they reach the end, reverse direction or despawn
+        field_size = 25
+        edge_offset = 22
+        
+        if self.monkey_mode == "NorthSouth":
+            # Monkeys walk along top/bottom edge (horizontal movement)
+            # Keep y position on edge (top or bottom)
+            if abs(self.position.z) > edge_offset + 2 or abs(self.position.z) < edge_offset - 2:
+                # Keep on edge - snap to top or bottom edge
+                if self.position.z > 0:
+                    new_y = edge_offset  # Top edge
+                else:
+                    new_y = -edge_offset  # Bottom edge
+            
+            # Check if reached end of edge
+            if new_x > field_size or new_x < -field_size:
+                # Reached end - despawn (monkey goes into forest)
+                return "despawn"
+        else:  # WestEast
+            # Monkeys walk along left/right edge (vertical movement)
+            # Keep x position on edge (left or right)
+            if abs(self.position.x) > edge_offset + 2 or abs(self.position.x) < edge_offset - 2:
+                # Keep on edge - snap to left or right edge
+                if self.position.x > 0:
+                    new_x = edge_offset  # Right edge
+                else:
+                    new_x = -edge_offset  # Left edge
+            
+            # Check if reached end of edge
+            if new_y > field_size or new_y < -field_size:
+                # Reached end - despawn
+                return "despawn"
         
         # Apply movement
-        self.position.x += self.move_direction.x * self.move_speed * dt
-        self.position.z += self.move_direction.z * self.move_speed * dt
+        self.position.x = new_x
+        self.position.z = new_y
         self.node.setPos(self.position)
+        
+        # Check if monkey is perpendicular to player (can throw)
+        # Monkey throws when it's directly across from player (perpendicular line)
+        can_throw = False
+        if self.monkey_mode == "NorthSouth":
+            # Monkeys walk along top/bottom edge (horizontal movement along x)
+            # Throw when player is at same z level (perpendicular - monkey's x line crosses player's z)
+            if abs(self.position.z - player_pos[1]) < 4.0:  # Close enough to be perpendicular
+                can_throw = True
+        else:  # WestEast
+            # Monkeys walk along left/right edge (vertical movement along z)
+            # Throw when player is at same x level (perpendicular - monkey's z line crosses player's x)
+            if abs(self.position.x - player_pos[0]) < 4.0:  # Close enough to be perpendicular
+                can_throw = True
         
         # Update throwing cooldown
         self.throw_cooldown -= dt
         
-        # Can throw? (cooldown depends on age - older monkeys throw faster)
-        if self.throw_cooldown <= 0:
+        # Can throw? Only when perpendicular to player
+        if can_throw and self.throw_cooldown <= 0:
             self.throw_cooldown = self.max_cooldown
             return self._throw_poop(player_pos)
         
         return None
     
     def _throw_poop(self, player_pos: tuple):
-        """Throw poop at player"""
-        # Calculate direction with accuracy
+        """Throw poop at player (perpendicular throw from edge)"""
+        # Throw directly at player position with accuracy
         target_x = player_pos[0] + random.uniform(-3, 3) * (1 - self.stats["accuracy"])
         target_y = player_pos[1] + random.uniform(-3, 3) * (1 - self.stats["accuracy"])
         
@@ -250,21 +276,12 @@ class Poop:
 class MinigameScene(BaseScene):
     """Мини-игра 'Обезьянья атака'"""
     
-    # Start positions (North, South, West, East) - 5x larger
-    START_POSITIONS = {
-        "North": (0, 15),      # 3 * 5
-        "South": (0, -15),     # -3 * 5
-        "West": (-15, 0),      # -3 * 5
-        "East": (15, 0)        # 3 * 5
-    }
+    # Monkey movement modes (determines where monkeys walk)
+    # NorthSouth: monkeys walk from left and right edges (along top/bottom)
+    # WestEast: monkeys walk from top and bottom edges (along left/right)
     
-    # Movement area bounds (relative to field center) - 5x larger
-    MOVEMENT_BOUNDS = {
-        "min_x": -20.0,  # -4 * 5
-        "max_x": 20.0,   # 4 * 5
-        "min_y": -20.0,  # -4 * 5
-        "max_y": 20.0    # 4 * 5
-    }
+    # Movement area bounds - player can move freely (no restrictions)
+    MOVEMENT_BOUNDS = None  # No bounds - full freedom
     
     def __init__(self, base, balance_config: dict):
         super().__init__(base, "Minigame")
@@ -276,7 +293,7 @@ class MinigameScene(BaseScene):
         self.poops = []
         self.game_time = 0
         self.is_game_over = False
-        self.selected_start_position = None  # Will be set by dialog
+        self.monkey_mode = None  # "NorthSouth" or "WestEast" - determines monkey movement pattern
         
         # Visual elements
         self.clearing = None  # Поляна
@@ -305,11 +322,11 @@ class MinigameScene(BaseScene):
         self.background.setColor(0.3, 0.5, 0.2, 1.0)  # Dark green (bushes/forest)
         self.background.setBillboardPointEye()
     
-    def _create_clearing_and_bushes(self, start_position: str):
-        """Create clearing (поляна) and bushes based on player start position
+    def _create_clearing_and_bushes(self, monkey_mode: str):
+        """Create clearing (поляна) in center and bushes around edges
         
         Args:
-            start_position: "North", "South", "West", or "East"
+            monkey_mode: "NorthSouth" or "WestEast" - determines where monkeys walk
         """
         # Clean up old elements
         if self.clearing:
@@ -318,59 +335,27 @@ class MinigameScene(BaseScene):
             bush.removeNode()
         self.bushes.clear()
         
-        # Clearing size (поляна перед персонажем)
-        clearing_size_x = 25.0  # Width
-        clearing_size_y = 20.0  # Depth
+        # Clearing size - large clearing in center
+        clearing_size_x = 30.0  # Width
+        clearing_size_y = 30.0  # Depth
         
-        # Determine clearing position based on start position
-        # Поляна всегда перед персонажем
-        if start_position == "North":
-            # Персонаж на севере, поляна вниз (к центру)
-            clearing_center = (0, -5)
-            # Кусты: сзади (север), слева (запад), справа (восток)
-            bush_positions = [
-                # Сзади (север)
-                (0, 15, 30, 5),  # x, y, width, height
-                # Слева (запад)
-                (-20, -5, 5, 30),
-                # Справа (восток)
-                (20, -5, 5, 30),
-            ]
-        elif start_position == "South":
-            # Персонаж на юге, поляна вверх (к центру)
-            clearing_center = (0, 5)
-            bush_positions = [
-                # Сзади (юг)
-                (0, -15, 30, 5),
-                # Слева (запад)
-                (-20, 5, 5, 30),
-                # Справа (восток)
-                (20, 5, 5, 30),
-            ]
-        elif start_position == "West":
-            # Персонаж на западе, поляна вправо (к центру)
-            clearing_center = (5, 0)
-            bush_positions = [
-                # Сзади (запад)
-                (-15, 0, 5, 30),
-                # Слева (север)
-                (5, 15, 30, 5),
-                # Справа (юг)
-                (5, -15, 30, 5),
-            ]
-        else:  # East
-            # Персонаж на востоке, поляна влево (к центру)
-            clearing_center = (-5, 0)
-            bush_positions = [
-                # Сзади (восток)
-                (15, 0, 5, 30),
-                # Слева (север)
-                (-5, 15, 30, 5),
-                # Справа (юг)
-                (-5, -15, 30, 5),
-            ]
+        # Clearing always in center (player spawns here)
+        clearing_center = (0, 0)
         
-        # Create clearing (поляна) - светлая трава
+        # Create bushes around edges (forest)
+        # Top edge
+        bush_positions = [
+            # Top (север)
+            (0, 20, 50, 5),  # x, y, width, height
+            # Bottom (юг)
+            (0, -20, 50, 5),
+            # Left (запад)
+            (-25, 0, 5, 40),
+            # Right (восток)
+            (25, 0, 5, 40),
+        ]
+        
+        # Create clearing (поляна) - светлая трава в центре
         cm_clearing = CardMaker("clearing")
         cm_clearing.setFrame(-clearing_size_x/2, clearing_size_x/2, -clearing_size_y/2, clearing_size_y/2)
         self.clearing = self.base.render.attachNewNode(cm_clearing.generate())
@@ -378,20 +363,20 @@ class MinigameScene(BaseScene):
         self.clearing.setColor(0.5, 0.7, 0.4, 1.0)  # Light green (clearing)
         self.clearing.setBillboardPointEye()
         
-        # Create bushes (кусты) - тёмная зелень
+        # Create bushes (кусты) - тёмная зелень по краям
         for x, y, w, h in bush_positions:
             cm_bush = CardMaker(f"bush_{len(self.bushes)}")
             cm_bush.setFrame(-w/2, w/2, -h/2, h/2)
             bush = self.base.render.attachNewNode(cm_bush.generate())
             bush.setPos(x, 1.1, y)
-            bush.setColor(0.2, 0.4, 0.15, 1.0)  # Dark green (bushes)
+            bush.setColor(0.2, 0.4, 0.15, 1.0)  # Dark green (bushes/forest)
             bush.setBillboardPointEye()
             self.bushes.append(bush)
         
-        logger.info(f"Created clearing at {clearing_center} and {len(self.bushes)} bush areas for position {start_position}")
+        logger.info(f"Created clearing at center and {len(self.bushes)} bush areas for mode {monkey_mode}")
     
     def _spawn_monkeys(self):
-        """Spawn monkeys in bushes - they will run onto the clearing"""
+        """Spawn monkeys on edges - they will walk along the forest edge"""
         # Clear existing
         for monkey in self.monkeys:
             monkey.cleanup()
@@ -413,56 +398,96 @@ class MinigameScene(BaseScene):
         while len(ages) < count:
             ages.append(random.choice([1, 2, 3, 4]))
         
-        # Spawn monkeys in bushes (around the clearing, not on it)
-        # They will run onto the clearing during gameplay
-        spawn_radius = 30  # Outside the clearing
+        # Spawn monkeys on edges based on mode
+        # NorthSouth: monkeys spawn on left/right edges, walk along top/bottom
+        # WestEast: monkeys spawn on top/bottom edges, walk along left/right
+        field_size = 25  # Edge of field
+        edge_offset = 22  # Slightly inside edge
+        
         for i, age in enumerate(ages):
-            # Spawn in a circle around the clearing
-            angle = (i / count) * 3.14159 * 2
-            x = spawn_radius * (angle / 3.14159)
-            y = spawn_radius * ((i % 2) * 2 - 1)
-            
-            # Make sure they're not too close to center (in bushes, not on clearing)
-            if abs(x) < 15 and abs(y) < 12:
-                # Too close to clearing, push out
-                if abs(x) < abs(y):
-                    x = 15 if x >= 0 else -15
-                else:
-                    y = 12 if y >= 0 else -12
-            
             stats = stats_by_age[str(age)]
-            monkey = Monkey(self.base, age, (x, y), stats)
+            
+            if self.monkey_mode == "NorthSouth":
+                # Monkeys walk along top/bottom edges (horizontal movement)
+                # They spawn on left/right edge and walk horizontally
+                edge_side = random.choice(["top", "bottom"])
+                x = random.uniform(-field_size, field_size)  # Random position along edge
+                y = edge_offset if edge_side == "top" else -edge_offset
+                walk_direction = "horizontal"
+            else:  # WestEast
+                # Monkeys walk along left/right edges (vertical movement)
+                # They spawn on top/bottom edge and walk vertically
+                edge_side = random.choice(["left", "right"])
+                x = edge_offset if edge_side == "right" else -edge_offset
+                y = random.uniform(-field_size, field_size)  # Random position along edge
+                walk_direction = "vertical"
+            
+            monkey = Monkey(self.base, age, (x, y), stats, walk_direction, self.monkey_mode)
             self.monkeys.append(monkey)
         
-        logger.info(f"Spawned {count} monkeys in bushes (will run onto clearing)")
+        logger.info(f"Spawned {count} monkeys on edges (mode: {self.monkey_mode})")
     
-    def enter(self, player, start_position: str = "North"):
+    def _spawn_single_monkey(self):
+        """Spawn a single monkey on edge (for continuous spawning)"""
+        if len(self.monkeys) >= self.balance["monkeys"]["count_max"]:
+            return  # Don't spawn if already at max
+        
+        distribution = self.balance["monkeys"]["age_distribution"]
+        stats_by_age = self.balance["monkeys"]["stats_by_age"]
+        
+        # Random age based on distribution
+        rand = random.random()
+        cumulative = 0
+        age = 1
+        for age_str, prob in distribution.items():
+            cumulative += prob
+            if rand <= cumulative:
+                age = int(age_str)
+                break
+        
+        stats = stats_by_age[str(age)]
+        field_size = 25
+        edge_offset = 22
+        
+        if self.monkey_mode == "NorthSouth":
+            # Walk along top/bottom edge (horizontal)
+            edge_side = random.choice(["top", "bottom"])
+            x = random.uniform(-field_size, field_size)
+            y = edge_offset if edge_side == "top" else -edge_offset
+            walk_direction = "horizontal"
+        else:  # WestEast
+            # Walk along left/right edge (vertical)
+            edge_side = random.choice(["left", "right"])
+            x = edge_offset if edge_side == "right" else -edge_offset
+            y = random.uniform(-field_size, field_size)
+            walk_direction = "vertical"
+        
+        monkey = Monkey(self.base, age, (x, y), stats, walk_direction, self.monkey_mode)
+        self.monkeys.append(monkey)
+        logger.debug(f"Spawned new monkey at ({x}, {y})")
+    
+    def enter(self, player, monkey_mode: str = "NorthSouth"):
         """Enter minigame
         
         Args:
             player: Player instance
-            start_position: One of "North", "South", "West", "East"
+            monkey_mode: "NorthSouth" or "WestEast" - determines where monkeys walk
         """
         super().enter(player)
         
-        self.selected_start_position = start_position
+        self.monkey_mode = monkey_mode
         
         # Reset game state
         self.game_time = 0
         self.is_game_over = False
         
-        # Set player position based on selection
-        if start_position in self.START_POSITIONS:
-            pos = self.START_POSITIONS[start_position]
-            player.set_position(pos[0], pos[1])
-        else:
-            # Default to center if invalid
-            player.set_position(0, 0)
+        # Player always spawns in center
+        player.set_position(0, 0)
         
-        # Create clearing and bushes based on start position
-        self._create_clearing_and_bushes(start_position)
+        # Create clearing and bushes (always same - center clearing)
+        self._create_clearing_and_bushes(monkey_mode)
         
-        # Spawn monkeys (they will run onto the clearing)
+        # Spawn monkeys on edges (they will walk along forest)
         self._spawn_monkeys()
         
         # Show background
@@ -501,10 +526,24 @@ class MinigameScene(BaseScene):
         # Update monkeys and collect new poops
         player_pos = self.base.player.get_position()
         
+        monkeys_to_remove = []
         for monkey in self.monkeys:
-            new_poop = monkey.update(dt, player_pos)
-            if new_poop:
-                self.poops.append(new_poop)
+            result = monkey.update(dt, player_pos)
+            if result == "despawn":
+                # Monkey reached end and went into forest
+                monkeys_to_remove.append(monkey)
+            elif result:  # It's a poop object
+                self.poops.append(result)
+        
+        # Remove despawned monkeys
+        for monkey in monkeys_to_remove:
+            if monkey in self.monkeys:
+                monkey.cleanup()
+                self.monkeys.remove(monkey)
+        
+        # Spawn new monkeys periodically to keep the game challenging
+        if random.random() < 0.01 * dt:  # Small chance each frame
+            self._spawn_single_monkey()
         
         # Update poops and check collisions
         for poop in self.poops[:]:

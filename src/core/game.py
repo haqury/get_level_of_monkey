@@ -56,6 +56,9 @@ class Game(ShowBase):
             max_energy=self.game_config["player"]["initial_energy"],
             regen_rate=self.game_config["player"]["energy_regen_rate"]
         )
+        # Set cheater mode if enabled in config
+        if self.game_config["player"].get("cheater_mode", False):
+            self.energy_system.cheater_mode = True
         
         self.health_system = HealthSystem(
             max_hp=self.game_config["player"]["initial_hp"]
@@ -625,35 +628,24 @@ class Game(ShowBase):
                 # Get current scene for movement restrictions
                 current_scene = self.scene_manager.get_current_scene()
                 
-                # Apply movement restrictions based on minigame start position
-                if current_scene and hasattr(current_scene, 'selected_start_position'):
-                    start_pos = current_scene.selected_start_position
-                    # If North or South: restrict vertical movement (only left/right allowed)
-                    if start_pos in ["North", "South"]:
-                        move_dir = (move_dir[0], 0)  # Only horizontal movement
-                    # If West or East: restrict horizontal movement (only up/down allowed)
-                    elif start_pos in ["West", "East"]:
-                        move_dir = (0, move_dir[1])  # Only vertical movement
+                # No movement restrictions - player can move freely in minigame
                 
                 if move_dir != (0, 0):
                     # Only spend energy if using keyboard (not BrainLink)
                     should_spend_energy = not self.input_manager.is_using_brainlink()
                     
-                    # Try to spend energy (only for keyboard movement)
                     if should_spend_energy:
+                        # Try to spend energy (only for keyboard movement)
+                        # In cheater mode, spend() always returns True
                         if self.energy_system.spend(self.move_cost * dt):
-                            # Get movement bounds from current scene if in minigame
+                            # No movement bounds in minigame - full freedom
                             bounds = None
-                            if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
-                                bounds = current_scene.MOVEMENT_BOUNDS
                             # Check collisions before moving
                             self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
                     else:
                         # BrainLink movement - no energy cost, just move
-                        # Get movement bounds from current scene if in minigame
+                        # No movement bounds - full freedom
                         bounds = None
-                        if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
-                            bounds = current_scene.MOVEMENT_BOUNDS
                         # Check collisions before moving
                         if self._movement_debug_counter % 60 == 0:
                             logger.info(f"🎮 Game: Applying BrainLink movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), speed={self.player_speed}")
@@ -688,7 +680,7 @@ class Game(ShowBase):
                                         # Set the callback for the "Play Minigame" option
                                         # Use a proper callback that doesn't capture loop variables
                                         exit_dialog["options"] = [
-                                            ("Играть в мини-игру", self._on_father_agrees_to_minigame)
+                                            ("Play Minigame", self._on_father_agrees_to_minigame)
                                         ]
                                         self.dialog_box.show(father, exit_dialog)
                                         self._exit_dialog_shown = True  # Mark that dialog was shown
@@ -779,29 +771,31 @@ class Game(ShowBase):
         system_npc = SystemNPC()
         
         dialog = {
-            "title": "Выбор стартовой позиции",
-            "text": "Выберите, откуда начать мини-игру:",
+            "title": "Minigame Mode Selection",
+            "text": "Choose minigame mode (determines where monkeys walk from):",
             "options": [
-                ("Север (только влево/вправо)", lambda: self._start_minigame_with_position("North")),
-                ("Юг (только влево/вправо)", lambda: self._start_minigame_with_position("South")),
-                ("Запад (только вверх/вниз)", lambda: self._start_minigame_with_position("West")),
-                ("Восток (только вверх/вниз)", lambda: self._start_minigame_with_position("East"))
+                ("North-South (monkeys walk along top and bottom edges)", lambda: self._start_minigame_with_position("NorthSouth")),
+                ("West-East (monkeys walk along left and right edges)", lambda: self._start_minigame_with_position("WestEast"))
             ]
         }
         
-        logger.info(f"Attempting to show position selection dialog with {len(dialog['options'])} options")
+        logger.info(f"Attempting to show minigame mode selection dialog with {len(dialog['options'])} options")
         self.dialog_box.show(system_npc, dialog)
-        logger.info("Position selection dialog should be visible now with 4 options: North, South, West, East")
+        logger.info("Minigame mode selection dialog should be visible now with 2 options: NorthSouth, WestEast")
     
-    def _start_minigame_with_position(self, position: str):
-        """Start minigame with selected position"""
-        logger.info(f"Starting minigame at position: {position}")
+    def _start_minigame_with_position(self, monkey_mode: str):
+        """Start minigame with selected mode
+        
+        Args:
+            monkey_mode: "NorthSouth" or "WestEast" - determines where monkeys walk
+        """
+        logger.info(f"Starting minigame with mode: {monkey_mode}")
         self._exit_dialog_shown = False  # Reset flag when starting minigame
         self.dialog_box.hide()
-        # Store position for scene manager
-        self._pending_minigame_position = position
+        # Store mode for scene manager
+        self._pending_minigame_position = monkey_mode
         # Use scene manager to switch (it will handle lazy loading)
-        self.scene_manager.switch_to("minigame", self.player, position)
+        self.scene_manager.switch_to("minigame", self.player, monkey_mode)
     
     def cleanup(self):
         """Cleanup on exit"""

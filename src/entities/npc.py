@@ -137,9 +137,9 @@ class Father(NPC):
         
         # Special dialog when trying to exit (will be triggered by scene)
         self.exit_dialog = {
-            "text": "Одному выходить нельзя! Давай лучше поиграем - там обезьяны снаружи!",
+            "text": "You can't go out alone! Let's play a game instead - there are monkeys outside!",
             "options": [
-                ("Играть в мини-игру", lambda: None)  # Callback will be set by scene
+                ("Play Minigame", lambda: None)  # Callback will be set by scene
             ]
         }
 

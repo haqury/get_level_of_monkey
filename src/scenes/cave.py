@@ -28,7 +28,7 @@ class CaveScene(BaseScene):
             "name": "to_kitchen",
             "pos": (32, 0),  # Right wall - near x=35
             "target_scene": "kitchen",
-            "text": "→ Кухня"
+            "text": "→ Kitchen"
         })
         
         self.exits.append({

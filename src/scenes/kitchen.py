@@ -26,7 +26,7 @@ class KitchenScene(BaseScene):
             "name": "to_cave",
             "pos": (-25, 0),  # -5 * 5
             "target_scene": "cave",
-            "text": "← Пещера"
+            "text": "← Cave"
         })
         
         # Create exit markers
