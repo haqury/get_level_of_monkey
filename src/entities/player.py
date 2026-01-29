@@ -30,7 +30,8 @@ class Player(DirectObject):
         # Create visual representation with sprite
         self.node = self._create_visual()
         self.node.reparentTo(base.render)
-        self.node.setPos(self.position)
+        # Set Y position to 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
+        self.node.setPos(self.position.x, 1.0, self.position.z)
         
         # Animation state
         self.facing_direction = "down"  # up, down, left, right
@@ -81,6 +82,10 @@ class Player(DirectObject):
         
         node.setBillboardPointEye()
         node.setTwoSided(True)  # Make sprite visible from both sides
+        # Set render order - player should be above environment
+        node.setBin("fixed", 30)  # Render after environment (background: 0, clearing: 10, forest: 20)
+        node.setDepthTest(False)
+        node.setDepthWrite(False)
         
         return node
     
@@ -101,7 +106,8 @@ class Player(DirectObject):
     def set_position(self, x: float, y: float):
         """Set player position"""
         self.position = Vec3(x, 0, y)
-        self.node.setPos(self.position)
+        # Set Y position to 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
+        self.node.setPos(self.position.x, 1.0, self.position.z)
     
     def move(self, dx: float, dy: float, dt: float, speed: float, bounds: dict = None, scene = None):
         """
@@ -146,7 +152,8 @@ class Player(DirectObject):
             # Move
             self.position.x = new_x
             self.position.z = new_y
-            self.node.setPos(self.position)
+            # Keep Y at 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
+            self.node.setPos(self.position.x, 1.0, self.position.z)
         else:
             if self.is_moving:
                 self.is_moving = False
@@ -184,6 +191,20 @@ class Player(DirectObject):
             # Top wall edge at z = 18
             if new_y > 18 - player_radius:
                 return True
+        
+        # Check collisions with forest boundaries (minigame)
+        if hasattr(scene, 'bushes') and scene.bushes and hasattr(scene, 'clearing'):
+            # Forest boundaries are outside the clearing
+            # Clearing is 60x30, centered at (0, 0) - updated to match new clearing size
+            # So boundaries are at: x = ±30, y = ±15
+            clearing_width = 60.0  # Updated to match new clearing size
+            clearing_height = 30.0  # Updated to match new clearing size
+            
+            # Check if player would be outside clearing (in forest)
+            if abs(new_x) > clearing_width/2 - player_radius:
+                return True  # Collision with left/right forest
+            if abs(new_y) > clearing_height/2 - player_radius:
+                return True  # Collision with top/bottom forest
         
         # Check collisions with NPCs
         if hasattr(scene, 'npcs'):

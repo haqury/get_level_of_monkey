@@ -70,6 +70,10 @@ class Monkey:
                 texture = self.base.loader.loadTexture(str(sprite_path))
                 node.setTexture(texture)
                 node.setTwoSided(True)
+                # Set render order - monkeys should be above environment
+                node.setBin("fixed", 30)  # Render after environment (background: 0, clearing: 10, forest: 20)
+                node.setDepthTest(False)
+                node.setDepthWrite(False)
             except Exception as e:
                 logger.warning(f"Could not load monkey sprite: {e}")
                 # Fallback to color
@@ -102,42 +106,46 @@ class Monkey:
         new_y = self.position.z + movement.z
         
         # Keep monkeys on edge - if they reach the end, reverse direction or despawn
-        field_size = 25
-        edge_offset = 22
+        # Use clearing boundaries (playable area) - updated to match new clearing size
+        clearing_width = 60.0  # Updated to match new clearing size
+        clearing_height = 30.0  # Updated to match new clearing size
+        edge_offset_x = clearing_width / 2
+        edge_offset_y = clearing_height / 2
         
         if self.monkey_mode == "NorthSouth":
             # Monkeys walk along top/bottom edge (horizontal movement)
             # Keep y position on edge (top or bottom)
-            if abs(self.position.z) > edge_offset + 2 or abs(self.position.z) < edge_offset - 2:
+            if abs(self.position.z) > edge_offset_y + 1 or abs(self.position.z) < edge_offset_y - 1:
                 # Keep on edge - snap to top or bottom edge
                 if self.position.z > 0:
-                    new_y = edge_offset  # Top edge
+                    new_y = edge_offset_y  # Top edge
                 else:
-                    new_y = -edge_offset  # Bottom edge
+                    new_y = -edge_offset_y  # Bottom edge
             
             # Check if reached end of edge
-            if new_x > field_size or new_x < -field_size:
+            if new_x > clearing_width/2 or new_x < -clearing_width/2:
                 # Reached end - despawn (monkey goes into forest)
                 return "despawn"
         else:  # WestEast
             # Monkeys walk along left/right edge (vertical movement)
             # Keep x position on edge (left or right)
-            if abs(self.position.x) > edge_offset + 2 or abs(self.position.x) < edge_offset - 2:
+            if abs(self.position.x) > edge_offset_x + 1 or abs(self.position.x) < edge_offset_x - 1:
                 # Keep on edge - snap to left or right edge
                 if self.position.x > 0:
-                    new_x = edge_offset  # Right edge
+                    new_x = edge_offset_x  # Right edge
                 else:
-                    new_x = -edge_offset  # Left edge
+                    new_x = -edge_offset_x  # Left edge
             
             # Check if reached end of edge
-            if new_y > field_size or new_y < -field_size:
+            if new_y > clearing_height/2 or new_y < -clearing_height/2:
                 # Reached end - despawn
                 return "despawn"
         
         # Apply movement
         self.position.x = new_x
         self.position.z = new_y
-        self.node.setPos(self.position)
+        # Keep Y at 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
+        self.node.setPos(self.position.x, 1.0, self.position.z)
         
         # Check if monkey is perpendicular to player (can throw)
         # Monkey throws when it's directly across from player (perpendicular line)
@@ -245,7 +253,8 @@ class Poop:
         
         # Move
         self.position += self.velocity * dt
-        self.node.setPos(self.position)
+        # Keep Y at 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
+        self.node.setPos(self.position.x, 1.0, self.position.z)
         
         # Lifetime
         self.lifetime -= dt
@@ -280,8 +289,14 @@ class MinigameScene(BaseScene):
     # NorthSouth: monkeys walk from left and right edges (along top/bottom)
     # WestEast: monkeys walk from top and bottom edges (along left/right)
     
-    # Movement area bounds - player can move freely (no restrictions)
-    MOVEMENT_BOUNDS = None  # No bounds - full freedom
+    # Movement area bounds - player restricted to clearing (playable area)
+    # Using cave dimensions as base: clearing is 60x30, centered at (0, 0)
+    MOVEMENT_BOUNDS = {
+        "min_x": -30.0,  # Clearing width / 2 (60.0 / 2)
+        "max_x": 30.0,
+        "min_y": -15.0,   # Clearing height / 2 (30.0 / 2)
+        "max_y": 15.0
+    }
     
     def __init__(self, base, balance_config: dict):
         super().__init__(base, "Minigame")
@@ -313,14 +328,46 @@ class MinigameScene(BaseScene):
         logger.info("Minigame scene created")
     
     def _create_background(self):
-        """Create minigame background (5x larger)"""
+        """Create minigame background - forest floor
+        Uses cave dimensions as base: -35 to 35 (width), -18 to 18 (height)
+        """
+        from pathlib import Path
+        from panda3d.core import TextureStage, Texture
+        
+        # Background matches cave dimensions exactly
         cm = CardMaker("minigame_bg")
-        cm.setFrame(-50, 50, -30, 30)  # 5x larger
+        cm.setFrame(-35, 35, -18, 18)  # Same as cave dimensions
         
         self.background = self.base.render.attachNewNode(cm.generate())
-        self.background.setPos(0, 1, 0)
-        self.background.setColor(0.3, 0.5, 0.2, 1.0)  # Dark green (bushes/forest)
+        self.background.setPos(0, 0.5, 0)  # Lower Y position for background
+        
+        # Try to load forest floor sprite
+        forest_floor_path = Path("assets/sprites/minigame/forest_floor.png")
+        if forest_floor_path.exists():
+            try:
+                forest_floor_texture = self.base.loader.loadTexture(str(forest_floor_path))
+                forest_floor_texture.setWrapU(Texture.WMRepeat)
+                forest_floor_texture.setWrapV(Texture.WMRepeat)
+                ts = TextureStage('default')
+                self.background.setTexture(ts, forest_floor_texture)
+                # Correct tile scale: frame is 70x36 units, sprite is 32x32 pixels
+                # Scale to tile properly (divide by sprite size)
+                # Correct tile scale: frame is 70x36 units, sprite is 32x32 pixels
+                # Match cave scaling: use same approach as cave (35.0, 18.0 for 70x36 frame)
+                # This tiles the texture properly across the full area
+                self.background.setTexScale(ts, 35.0, 18.0)  # Same as cave for consistency
+                logger.info(f"Loaded forest floor sprite from: {forest_floor_path}")
+            except Exception as e:
+                logger.warning(f"Could not load forest floor sprite: {e}")
+                self.background.setColor(0.25, 0.4, 0.15, 1.0)  # Fallback color
+        else:
+            # Fallback to color
+            self.background.setColor(0.25, 0.4, 0.15, 1.0)  # Medium dark green (forest floor)
+        
         self.background.setBillboardPointEye()
+        self.background.setTwoSided(True)
+        self.background.setDepthTest(False)
+        self.background.setDepthWrite(False)
     
     def _create_clearing_and_bushes(self, monkey_mode: str):
         """Create clearing (поляна) in center and bushes around edges
@@ -335,45 +382,144 @@ class MinigameScene(BaseScene):
             bush.removeNode()
         self.bushes.clear()
         
-        # Clearing size - large clearing in center
-        clearing_size_x = 30.0  # Width
-        clearing_size_y = 30.0  # Depth
+        # Clearing size - playable area using cave dimensions as base
+        # Cave is -35 to 35 (width 70), -18 to 18 (height 36)
+        # Playable area should be larger - most of the space, with thin forest on edges
+        # Make clearing much larger: ~85% of cave dimensions
+        clearing_size_x = 60.0  # Width - much larger (was 30.0)
+        clearing_size_y = 30.0  # Height - much larger (was 14.0)
         
         # Clearing always in center (player spawns here)
         clearing_center = (0, 0)
         
-        # Create bushes around edges (forest)
-        # Top edge
+        # Create visible forest boundaries around edges
+        # Forest should be at cave boundaries (-35 to 35, -18 to 18)
+        # Forest thickness should fill the space between clearing and cave edges
+        # With larger clearing (60x30), forest will be thinner but still visible
+        forest_thickness_left = max(2.0, 35 - clearing_size_x/2)  # At least 2 units thick
+        forest_thickness_right = max(2.0, 35 - clearing_size_x/2)
+        forest_thickness_top = max(2.0, 18 - clearing_size_y/2)  # At least 2 units thick
+        forest_thickness_bottom = max(2.0, 18 - clearing_size_y/2)
+        
         bush_positions = [
-            # Top (север)
-            (0, 20, 50, 5),  # x, y, width, height
-            # Bottom (юг)
-            (0, -20, 50, 5),
-            # Left (запад)
-            (-25, 0, 5, 40),
-            # Right (восток)
-            (25, 0, 5, 40),
+            # Top forest wall (north) - from clearing top to cave top
+            (0, clearing_size_y/2 + forest_thickness_top/2, 70, forest_thickness_top),
+            # Bottom forest wall (south) - from clearing bottom to cave bottom
+            (0, -clearing_size_y/2 - forest_thickness_bottom/2, 70, forest_thickness_bottom),
+            # Left forest wall (west) - from clearing left to cave left
+            (-clearing_size_x/2 - forest_thickness_left/2, 0, forest_thickness_left, 36),
+            # Right forest wall (east) - from clearing right to cave right
+            (clearing_size_x/2 + forest_thickness_right/2, 0, forest_thickness_right, 36),
         ]
         
-        # Create clearing (поляна) - светлая трава в центре
+        # Create clearing (clearing) - light grass in center (playable area)
+        # Try to load clearing sprite
+        from pathlib import Path
+        from panda3d.core import TextureStage, Texture
+        
+        # Try to load clearing sprite, fallback to floor sprite
+        clearing_sprite_path = Path("assets/sprites/minigame/clearing.png")
+        clearing_texture = None
+        if clearing_sprite_path.exists():
+            try:
+                clearing_texture = self.base.loader.loadTexture(str(clearing_sprite_path))
+                logger.info(f"Loaded clearing sprite from: {clearing_sprite_path}")
+            except Exception as e:
+                logger.warning(f"Could not load clearing sprite: {e}")
+        
+        # Fallback to floor sprite if clearing sprite doesn't exist
+        if not clearing_texture:
+            floor_sprite_path = Path("assets/sprites/tiles/floor.png")
+            if floor_sprite_path.exists():
+                try:
+                    clearing_texture = self.base.loader.loadTexture(str(floor_sprite_path))
+                    logger.info(f"Using floor sprite as clearing texture")
+                except Exception as e:
+                    logger.debug(f"Could not load floor sprite: {e}")
+        
         cm_clearing = CardMaker("clearing")
         cm_clearing.setFrame(-clearing_size_x/2, clearing_size_x/2, -clearing_size_y/2, clearing_size_y/2)
         self.clearing = self.base.render.attachNewNode(cm_clearing.generate())
-        self.clearing.setPos(clearing_center[0], 1.1, clearing_center[1])
-        self.clearing.setColor(0.5, 0.7, 0.4, 1.0)  # Light green (clearing)
-        self.clearing.setBillboardPointEye()
+        self.clearing.setPos(clearing_center[0], 0.6, clearing_center[1])  # Above background but below characters
         
-        # Create bushes (кусты) - тёмная зелень по краям
-        for x, y, w, h in bush_positions:
-            cm_bush = CardMaker(f"bush_{len(self.bushes)}")
+        if clearing_texture:
+            # Apply tiled texture
+            ts = TextureStage('default')
+            clearing_texture.setWrapU(Texture.WMRepeat)
+            clearing_texture.setWrapV(Texture.WMRepeat)
+            self.clearing.setTexture(ts, clearing_texture)
+            self.clearing.setTexScale(ts, clearing_size_x / 32.0, clearing_size_y / 32.0)
+        else:
+            # Fallback to color
+            self.clearing.setColor(0.5, 0.7, 0.4, 1.0)  # Light green (clearing)
+        
+        self.clearing.setBillboardPointEye()
+        self.clearing.setTwoSided(True)
+        # Set render order - clearing should be above background
+        self.clearing.setBin("fixed", 10)  # Render after background
+        self.clearing.setDepthTest(False)  # Ensure visibility
+        self.clearing.setDepthWrite(False)
+        logger.info(f"Created clearing at ({clearing_center[0]}, {clearing_center[1]}), size ({clearing_size_x}, {clearing_size_y}), texture={clearing_texture is not None}")
+        self.clearing.setDepthTest(False)  # Ensure visibility
+        self.clearing.setDepthWrite(False)
+        
+        # Create forest walls (bushes) - dark green forest boundaries
+        # Try to load forest sprite
+        forest_sprite_path = Path("assets/sprites/minigame/forest.png")
+        forest_texture = None
+        if forest_sprite_path.exists():
+            try:
+                forest_texture = self.base.loader.loadTexture(str(forest_sprite_path))
+                logger.info(f"Loaded forest sprite from: {forest_sprite_path}")
+            except Exception as e:
+                logger.warning(f"Could not load forest sprite: {e}")
+        
+        # Fallback to wall sprites if forest sprite not found
+        if not forest_texture:
+            fallback_paths = [
+                Path("assets/sprites/cave/cave_wall.png"),  # Prefer cave wall
+                Path("assets/sprites/tiles/wall.png"),
+            ]
+            for sprite_path in fallback_paths:
+                if sprite_path.exists():
+                    try:
+                        forest_texture = self.base.loader.loadTexture(str(sprite_path))
+                        logger.info(f"Using fallback forest texture from: {sprite_path}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"Could not load fallback texture from {sprite_path}: {e}")
+        
+        # Make them more visible with darker color and proper positioning
+        for i, (x, y, w, h) in enumerate(bush_positions):
+            cm_bush = CardMaker(f"forest_wall_{i}")
             cm_bush.setFrame(-w/2, w/2, -h/2, h/2)
             bush = self.base.render.attachNewNode(cm_bush.generate())
-            bush.setPos(x, 1.1, y)
-            bush.setColor(0.2, 0.4, 0.15, 1.0)  # Dark green (bushes/forest)
+            bush.setPos(x, 0.7, y)  # Above clearing but below characters
+            
+            # Apply texture if available, otherwise use color
+            if forest_texture:
+                ts = TextureStage('default')
+                forest_texture.setWrapU(Texture.WMRepeat)
+                forest_texture.setWrapV(Texture.WMRepeat)
+                bush.setTexture(ts, forest_texture)
+                # Tile texture appropriately
+                bush.setTexScale(ts, w / 32.0, h / 32.0)
+            else:
+                # Very dark green for forest - more visible boundary
+                # Make it darker and more distinct
+                bush.setColor(0.1, 0.25, 0.05, 1.0)  # Very dark green (forest)
+            
             bush.setBillboardPointEye()
+            bush.setTwoSided(True)  # Visible from both sides
+            # Set render order - forest should be above clearing
+            bush.setBin("fixed", 20)  # Render after clearing (which is at default 0)
+            bush.setDepthTest(False)  # Ensure visibility
+            bush.setDepthWrite(False)
             self.bushes.append(bush)
+            logger.debug(f"Created forest wall {i} at ({x}, {y}), size ({w}, {h}), texture={forest_texture is not None}, color={bush.getColor() if not forest_texture else 'textured'}")
         
         logger.info(f"Created clearing at center and {len(self.bushes)} bush areas for mode {monkey_mode}")
+        logger.info(f"Clearing texture loaded: {clearing_texture is not None}, Forest texture loaded: {forest_texture is not None}")
     
     def _spawn_monkeys(self):
         """Spawn monkeys on edges - they will walk along the forest edge"""
@@ -401,8 +547,11 @@ class MinigameScene(BaseScene):
         # Spawn monkeys on edges based on mode
         # NorthSouth: monkeys spawn on left/right edges, walk along top/bottom
         # WestEast: monkeys spawn on top/bottom edges, walk along left/right
-        field_size = 25  # Edge of field
-        edge_offset = 22  # Slightly inside edge
+        # Use clearing boundaries (playable area) - updated to match new clearing size
+        clearing_width = 60.0  # Clearing width (updated)
+        clearing_height = 30.0  # Clearing height (updated)
+        edge_offset_x = clearing_width / 2 - 1  # Slightly inside clearing edge
+        edge_offset_y = clearing_height / 2 - 1  # Slightly inside clearing edge
         
         for i, age in enumerate(ages):
             stats = stats_by_age[str(age)]
@@ -411,15 +560,15 @@ class MinigameScene(BaseScene):
                 # Monkeys walk along top/bottom edges (horizontal movement)
                 # They spawn on left/right edge and walk horizontally
                 edge_side = random.choice(["top", "bottom"])
-                x = random.uniform(-field_size, field_size)  # Random position along edge
-                y = edge_offset if edge_side == "top" else -edge_offset
+                x = random.uniform(-clearing_width/2, clearing_width/2)  # Random position along edge
+                y = edge_offset_y if edge_side == "top" else -edge_offset_y
                 walk_direction = "horizontal"
             else:  # WestEast
                 # Monkeys walk along left/right edges (vertical movement)
                 # They spawn on top/bottom edge and walk vertically
                 edge_side = random.choice(["left", "right"])
-                x = edge_offset if edge_side == "right" else -edge_offset
-                y = random.uniform(-field_size, field_size)  # Random position along edge
+                x = edge_offset_x if edge_side == "right" else -edge_offset_x
+                y = random.uniform(-clearing_height/2, clearing_height/2)  # Random position along edge
                 walk_direction = "vertical"
             
             monkey = Monkey(self.base, age, (x, y), stats, walk_direction, self.monkey_mode)
@@ -449,17 +598,23 @@ class MinigameScene(BaseScene):
         field_size = 25
         edge_offset = 22
         
+        # Use clearing boundaries - updated to match new clearing size
+        clearing_width = 60.0  # Updated
+        clearing_height = 30.0  # Updated
+        edge_offset_x = clearing_width / 2 - 1
+        edge_offset_y = clearing_height / 2 - 1
+        
         if self.monkey_mode == "NorthSouth":
             # Walk along top/bottom edge (horizontal)
             edge_side = random.choice(["top", "bottom"])
-            x = random.uniform(-field_size, field_size)
-            y = edge_offset if edge_side == "top" else -edge_offset
+            x = random.uniform(-clearing_width/2, clearing_width/2)
+            y = edge_offset_y if edge_side == "top" else -edge_offset_y
             walk_direction = "horizontal"
         else:  # WestEast
             # Walk along left/right edge (vertical)
             edge_side = random.choice(["left", "right"])
-            x = edge_offset if edge_side == "right" else -edge_offset
-            y = random.uniform(-field_size, field_size)
+            x = edge_offset_x if edge_side == "right" else -edge_offset_x
+            y = random.uniform(-clearing_height/2, clearing_height/2)
             walk_direction = "vertical"
         
         monkey = Monkey(self.base, age, (x, y), stats, walk_direction, self.monkey_mode)
@@ -490,20 +645,31 @@ class MinigameScene(BaseScene):
         # Spawn monkeys on edges (they will walk along forest)
         self._spawn_monkeys()
         
-        # Show background
-        self.background.show()
+        # Show background (lowest layer)
+        if self.background:
+            self.background.show()
+            logger.info(f"Background shown at position {self.background.getPos()}, hidden={self.background.isHidden()}")
         
-        # Show clearing and bushes
+        # Show clearing (middle layer - playable area)
         if self.clearing:
             self.clearing.show()
-        for bush in self.bushes:
-            bush.show()
+            logger.info(f"Clearing shown at position {self.clearing.getPos()}, hidden={self.clearing.isHidden()}, color={self.clearing.getColor()}")
+        
+        # Show forest walls (top layer - boundaries)
+        for i, bush in enumerate(self.bushes):
+            if bush:
+                bush.show()
+                pos = bush.getPos()
+                color = bush.getColor()
+                logger.info(f"Forest wall {i} shown at position ({pos.x}, {pos.y}, {pos.z}), hidden={bush.isHidden()}, color={color}")
+        
+        logger.info(f"Minigame visual elements: background={self.background is not None}, clearing={self.clearing is not None}, bushes={len(self.bushes)}")
         
         # Show survival time in HUD
         if hasattr(self.base, 'hud'):
             self.base.hud.show_survival_time()
         
-        logger.info(f"Minigame started! Position: {start_position}")
+        logger.info(f"Minigame started! Mode: {monkey_mode}")
     
     def update(self, dt: float):
         """Update minigame"""

@@ -638,14 +638,18 @@ class Game(ShowBase):
                         # Try to spend energy (only for keyboard movement)
                         # In cheater mode, spend() always returns True
                         if self.energy_system.spend(self.move_cost * dt):
-                            # No movement bounds in minigame - full freedom
+                            # Get movement bounds from current scene if in minigame
                             bounds = None
+                            if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
+                                bounds = current_scene.MOVEMENT_BOUNDS
                             # Check collisions before moving
                             self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
                     else:
                         # BrainLink movement - no energy cost, just move
-                        # No movement bounds - full freedom
+                        # Get movement bounds from current scene if in minigame
                         bounds = None
+                        if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
+                            bounds = current_scene.MOVEMENT_BOUNDS
                         # Check collisions before moving
                         if self._movement_debug_counter % 60 == 0:
                             logger.info(f"🎮 Game: Applying BrainLink movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), speed={self.player_speed}")

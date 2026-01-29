@@ -276,6 +276,95 @@ def create_cave_door():
         draw.line([10, y, 22, y], fill=(70, 50, 30, 255), width=1)
     return img
 
+def create_clearing():
+    """Create clearing (поляна) tile - light green grass area"""
+    import random
+    img = Image.new('RGBA', (32, 32), rgb_to_int((0.5, 0.7, 0.4)))  # Light green
+    draw = ImageDraw.Draw(img)
+    # Grass texture with some variation
+    for y in range(0, 32, 2):
+        for x in range(0, 32, 2):
+            color_var = random.randint(-20, 20)
+            base_color = (128, 179, 102)  # Light green base
+            color = (
+                max(0, min(255, base_color[0] + color_var)),
+                max(0, min(255, base_color[1] + color_var)),
+                max(0, min(255, base_color[2] + color_var))
+            )
+            draw.rectangle([x, y, x + 2, y + 2], fill=color)
+    # Add some grass blades
+    for _ in range(8):
+        x = random.randint(2, 30)
+        y = random.randint(2, 30)
+        draw.line([x, y, x, y + 2], fill=(100, 150, 80, 255), width=1)
+    # Add some small flowers/rocks for detail
+    for _ in range(3):
+        x = random.randint(4, 28)
+        y = random.randint(4, 28)
+        size = random.randint(1, 2)
+        draw.ellipse([x, y, x + size, y + size], fill=(200, 200, 100, 200))
+    return img
+
+def create_forest():
+    """Create forest tile - dark green with tree pattern"""
+    import random
+    img = Image.new('RGBA', (32, 32), rgb_to_int((0.1, 0.25, 0.05)))  # Very dark green
+    draw = ImageDraw.Draw(img)
+    # Dark forest floor
+    for y in range(0, 32, 4):
+        for x in range(0, 32, 4):
+            color_var = random.randint(-10, 10)
+            base_color = (26, 64, 13)  # Dark green base
+            color = (
+                max(0, min(255, base_color[0] + color_var)),
+                max(0, min(255, base_color[1] + color_var)),
+                max(0, min(255, base_color[2] + color_var))
+            )
+            draw.rectangle([x, y, x + 4, y + 4], fill=color)
+    # Tree trunks (vertical dark lines)
+    for x in range(4, 32, 8):
+        trunk_y_start = random.randint(8, 16)
+        trunk_height = random.randint(8, 16)
+        draw.rectangle([x, trunk_y_start, x + 2, min(32, trunk_y_start + trunk_height)], 
+                      fill=(40, 30, 20, 255), outline=(20, 15, 10, 255), width=1)
+    # Tree foliage (dark green circles/patches)
+    for _ in range(4):
+        x = random.randint(2, 30)
+        y = random.randint(2, 20)
+        size = random.randint(4, 8)
+        # Dark green foliage
+        draw.ellipse([x, y, x + size, y + size], fill=(20, 50, 10, 200), outline=(10, 25, 5, 255), width=1)
+    # Some darker shadows
+    for _ in range(6):
+        x = random.randint(0, 32)
+        y = random.randint(0, 32)
+        draw.ellipse([x, y, x + 2, y + 2], fill=(5, 15, 3, 150))
+    return img
+
+def create_forest_floor():
+    """Create forest floor tile - darker than clearing, lighter than forest"""
+    import random
+    img = Image.new('RGBA', (32, 32), rgb_to_int((0.25, 0.4, 0.15)))  # Medium dark green
+    draw = ImageDraw.Draw(img)
+    # Forest floor texture
+    for y in range(0, 32, 3):
+        for x in range(0, 32, 3):
+            color_var = random.randint(-15, 15)
+            base_color = (64, 102, 38)  # Medium green base
+            color = (
+                max(0, min(255, base_color[0] + color_var)),
+                max(0, min(255, base_color[1] + color_var)),
+                max(0, min(255, base_color[2] + color_var))
+            )
+            draw.rectangle([x, y, x + 3, y + 3], fill=color)
+    # Add some fallen leaves/twigs
+    for _ in range(5):
+        x = random.randint(2, 30)
+        y = random.randint(2, 30)
+        size = random.randint(1, 3)
+        draw.ellipse([x, y, x + size, y + size], fill=(50, 80, 30, 200))
+    return img
+
 def create_kitchen_decoration(name):
     """Create kitchen decoration - electronic appliances"""
     img = Image.new('RGBA', (32, 32), (0, 0, 0, 0))
@@ -403,6 +492,19 @@ def main():
     
     # Minigame elements
     os.makedirs(f"{base_dir}/minigame", exist_ok=True)
+    
+    # Clearing (playable area)
+    create_clearing().save(f"{base_dir}/minigame/clearing.png")
+    print(f"Created: {base_dir}/minigame/clearing.png")
+    
+    # Forest (impassable boundaries)
+    create_forest().save(f"{base_dir}/minigame/forest.png")
+    print(f"Created: {base_dir}/minigame/forest.png")
+    
+    # Forest floor (background)
+    create_forest_floor().save(f"{base_dir}/minigame/forest_floor.png")
+    print(f"Created: {base_dir}/minigame/forest_floor.png")
+    
     # Poop projectile
     poop = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
     draw = ImageDraw.Draw(poop)
