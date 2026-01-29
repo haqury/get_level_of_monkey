@@ -39,3 +39,10 @@ saves/*.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Documentation (internal)
+promt.txt
+KICKSTARTER_PREP.md
+KICKSTARTER_DESCRIPTION.md
+TZ.md
+TZ_FULL_COMPLIANCE.md
