@@ -192,19 +192,22 @@ class Player(DirectObject):
             if new_y > 18 - player_radius:
                 return True
         
-        # Check collisions with forest boundaries (minigame)
+        # Check collisions with forest/road (minigame) - player cannot step on road or forest
         if hasattr(scene, 'bushes') and scene.bushes and hasattr(scene, 'clearing'):
-            # Forest boundaries are outside the clearing
-            # Clearing is 60x30, centered at (0, 0) - updated to match new clearing size
-            # So boundaries are at: x = ±30, y = ±15
-            clearing_width = 60.0  # Updated to match new clearing size
-            clearing_height = 30.0  # Updated to match new clearing size
-            
-            # Check if player would be outside clearing (in forest)
-            if abs(new_x) > clearing_width/2 - player_radius:
-                return True  # Collision with left/right forest
-            if abs(new_y) > clearing_height/2 - player_radius:
-                return True  # Collision with top/bottom forest
+            # Use scene MOVEMENT_BOUNDS (playable area = clearing minus road)
+            if hasattr(scene, 'MOVEMENT_BOUNDS'):
+                b = scene.MOVEMENT_BOUNDS
+                if new_x < b.get("min_x", -30) + player_radius or new_x > b.get("max_x", 30) - player_radius:
+                    return True
+                if new_y < b.get("min_y", -15) + player_radius or new_y > b.get("max_y", 15) - player_radius:
+                    return True
+            else:
+                clearing_width = 60.0
+                clearing_height = 30.0
+                if abs(new_x) > clearing_width/2 - player_radius:
+                    return True
+                if abs(new_y) > clearing_height/2 - player_radius:
+                    return True
         
         # Check collisions with NPCs
         if hasattr(scene, 'npcs'):

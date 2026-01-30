@@ -119,7 +119,15 @@ class InputManager(DirectObject):
         self.accept("space", self._on_key, ["space", True])
         self.accept("space-up", self._on_key, ["space", False])
         
+        # Escape — pause menu (forward to game)
+        self.accept("escape", self._on_escape_key)
+        
         logger.debug("Keyboard bindings set up")
+    
+    def _on_escape_key(self):
+        """Escape key — open pause menu if in game."""
+        if hasattr(self.base, "_on_escape"):
+            self.base._on_escape()
     
     def _on_key(self, key: str, pressed: bool):
         """Handle keyboard event"""

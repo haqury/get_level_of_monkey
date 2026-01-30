@@ -18,6 +18,7 @@ from src.scenes.minigame import MinigameScene
 from src.scenes.main_menu import MainMenuScene
 from src.ui.hud import HUD
 from src.ui.dialog_box import DialogBox
+from src.ui.pause_menu import PauseMenu
 from src.services.brainlink_launcher import BrainLinkLauncher
 from src.services.save_system import SaveSystem
 
@@ -79,6 +80,13 @@ class Game(ShowBase):
         # UI
         self.hud = HUD(self)
         self.dialog_box = DialogBox(self)
+        self.pause_menu = PauseMenu(self)
+        self.on_pause_restart = self._on_pause_restart
+        self.on_pause_load = self._on_pause_load
+        self.on_pause_settings = self._on_pause_settings
+        self.on_pause_exit = self._on_pause_exit
+        
+        # ESC opens pause menu — bound in InputManager and calls self._on_escape
         
         # BrainLink launcher
         self.brainlink_launcher = BrainLinkLauncher()
@@ -583,6 +591,63 @@ class Game(ShowBase):
             else:
                 logger.debug("Player at exit, skipping regular NPC interaction")
     
+    def _on_escape(self):
+        """Toggle pause menu when ESC is pressed (only in game)."""
+        if not self.in_game:
+            return
+        if self.dialog_box.is_visible:
+            return
+        if self.pause_menu.is_visible:
+            self.pause_menu.hide()
+        else:
+            self.pause_menu.show()
+    
+    def _on_pause_restart(self):
+        """Restart current stage (minigame)."""
+        self.pause_menu.hide()
+        scene = self.scene_manager.get_current_scene()
+        scene_id = self.scene_manager.get_current_scene_name()
+        if scene_id == "minigame" and scene and getattr(scene, "monkey_mode", None):
+            self.scene_manager.switch_to("minigame", self.player, scene.monkey_mode)
+            self.health_system.current_hp = self.health_system.max_hp
+            self.energy_system.current_energy = self.energy_system.max_energy
+        else:
+            logger.info("Restart only available in minigame")
+    
+    def _on_pause_load(self):
+        """Load game from save."""
+        self.pause_menu.hide()
+        game_data = self.save_system.load_game()
+        if not game_data:
+            logger.info("No save file to load")
+            return
+        self.progression_system.level = game_data.get("level", 1)
+        self.progression_system.current_xp = game_data.get("current_xp", 0)
+        self.progression_system.upgrade_levels = game_data.get("upgrade_levels", {}).copy()
+        self._apply_upgrades()
+        self.health_system.current_hp = self.health_system.max_hp
+        self.energy_system.current_energy = self.energy_system.max_energy
+        scene_id = game_data.get("current_scene", "cave")
+        self.scene_manager.switch_to(scene_id, self.player)
+        logger.info(f"Game loaded, scene: {scene_id}")
+    
+    def _on_pause_settings(self):
+        """Open settings (main menu with settings panel)."""
+        self.pause_menu.hide()
+        self.in_game = False
+        self.hud.hide()
+        self.scene_manager.switch_to("main_menu", self.player)
+        menu = self.scene_manager.get_current_scene()
+        if menu and hasattr(menu, "_on_settings_clicked"):
+            menu._on_settings_clicked()
+    
+    def _on_pause_exit(self):
+        """Exit to main menu / quit game."""
+        self.pause_menu.hide()
+        self.in_game = False
+        self.hud.hide()
+        self.scene_manager.switch_to("main_menu", self.player)
+    
     def update(self, task):
         """Main game update loop"""
         dt = globalClock.getDt()
@@ -607,6 +672,14 @@ class Game(ShowBase):
         
         # Update systems
         self.energy_system.update(dt)
+        
+        # When pause menu is open: freeze game, don't update scene or movement
+        if self.pause_menu.is_visible:
+            if self.in_game:
+                self.hud.update_hp(self.health_system.current_hp, self.health_system.max_hp)
+                self.hud.update_energy(self.energy_system.get_percentage())
+                self.hud.update_level(self.progression_system.level)
+            return task.cont
         
         # Update scene
         self.scene_manager.update(dt)

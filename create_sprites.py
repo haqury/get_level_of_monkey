@@ -365,6 +365,29 @@ def create_forest_floor():
         draw.ellipse([x, y, x + size, y + size], fill=(50, 80, 30, 200))
     return img
 
+def create_road():
+    """Create road tile - path where monkeys walk (player cannot step on)"""
+    import random
+    img = Image.new('RGBA', (32, 32), rgb_to_int((0.35, 0.3, 0.25)))  # Brown/gray
+    draw = ImageDraw.Draw(img)
+    # Dirt/gravel texture
+    for y in range(0, 32, 2):
+        for x in range(0, 32, 2):
+            color_var = random.randint(-15, 15)
+            base_color = (89, 77, 64)
+            color = (
+                max(0, min(255, base_color[0] + color_var)),
+                max(0, min(255, base_color[1] + color_var)),
+                max(0, min(255, base_color[2] + color_var))
+            )
+            draw.rectangle([x, y, x + 2, y + 2], fill=color)
+    # Footprints / path marks
+    for _ in range(4):
+        x = random.randint(4, 28)
+        y = random.randint(4, 28)
+        draw.ellipse([x, y, x + 3, y + 3], fill=(70, 60, 50, 200))
+    return img
+
 def create_kitchen_decoration(name):
     """Create kitchen decoration - electronic appliances"""
     img = Image.new('RGBA', (32, 32), (0, 0, 0, 0))
@@ -504,6 +527,10 @@ def main():
     # Forest floor (background)
     create_forest_floor().save(f"{base_dir}/minigame/forest_floor.png")
     print(f"Created: {base_dir}/minigame/forest_floor.png")
+    
+    # Road (where monkeys walk - player cannot step on)
+    create_road().save(f"{base_dir}/minigame/road.png")
+    print(f"Created: {base_dir}/minigame/road.png")
     
     # Poop projectile
     poop = Image.new('RGBA', (16, 16), (0, 0, 0, 0))

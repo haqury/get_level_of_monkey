@@ -8,18 +8,26 @@ from src.scenes.base_scene import BaseScene
 logger = logging.getLogger(__name__)
 
 
+# Clearing and road constants (used by Monkey, Poop, MinigameScene)
+CLEARING_HALF_W = 30.0   # clearing 60x30, half width
+CLEARING_HALF_H = 15.0   # half height
+ROAD_WIDTH = 2.5         # road strip width; player cannot step on road
+
+
 class Monkey:
     """Обезьяна в мини-игре"""
     
-    def __init__(self, base, age: int, pos: tuple, stats: dict, walk_direction: str = "horizontal", monkey_mode: str = "NorthSouth"):
+    def __init__(self, base, age: int, pos: tuple, stats: dict, walk_direction: str = "horizontal", monkey_mode: str = "NorthSouth", base_poop_speed: float = 20.0, initial_direction: tuple = None):
         """
         Args:
             base: ShowBase
             age: Возраст обезьяны (1-4)
-            pos: Позиция (x, y)
+            pos: Позиция (x, y) — can be in forest so monkey walks out onto path
             stats: Характеристики (throw_speed, accuracy, cooldown)
             walk_direction: "horizontal" or "vertical" - direction along edge
             monkey_mode: "NorthSouth" or "WestEast" - determines movement pattern
+            base_poop_speed: Base speed for thrown poop
+            initial_direction: Optional (dx, dz) so monkey walks from forest onto path
         """
         self.base = base
         self.age = age
@@ -27,25 +35,23 @@ class Monkey:
         self.stats = stats
         self.walk_direction = walk_direction
         self.monkey_mode = monkey_mode
+        self.base_poop_speed = base_poop_speed
         
-        # Throwing state
+        # Throwing state — reduced cooldown so monkeys shoot more often
         self.throw_cooldown = 0
-        self.max_cooldown = stats["cooldown"]
+        self.max_cooldown = max(0.5, stats["cooldown"] * 0.4)  # ~0.6–1.2 s instead of 1.5–3 s
         
         # Movement state - monkeys walk along forest edge
         self.move_speed = random.uniform(3.0, 6.0)  # Speed along edge
         
-        # Set initial movement direction based on mode
-        if monkey_mode == "NorthSouth":
-            # Monkeys walk along top/bottom edge (horizontal movement)
-            # Random direction: left or right
+        if initial_direction is not None:
+            self.move_direction = Vec3(initial_direction[0], 0, initial_direction[1])
+        elif monkey_mode == "NorthSouth":
             direction = random.choice([-1, 1])
-            self.move_direction = Vec3(direction, 0, 0)  # Left or Right
-        else:  # WestEast
-            # Monkeys walk along left/right edge (vertical movement)
-            # Random direction: up or down
+            self.move_direction = Vec3(direction, 0, 0)
+        else:
             direction = random.choice([-1, 1])
-            self.move_direction = Vec3(0, 0, direction)  # Up or Down
+            self.move_direction = Vec3(0, 0, direction)
         
         self.move_direction.normalize()
         
@@ -70,10 +76,6 @@ class Monkey:
                 texture = self.base.loader.loadTexture(str(sprite_path))
                 node.setTexture(texture)
                 node.setTwoSided(True)
-                # Set render order - monkeys should be above environment
-                node.setBin("fixed", 30)  # Render after environment (background: 0, clearing: 10, forest: 20)
-                node.setDepthTest(False)
-                node.setDepthWrite(False)
             except Exception as e:
                 logger.warning(f"Could not load monkey sprite: {e}")
                 # Fallback to color
@@ -95,6 +97,10 @@ class Monkey:
             node.setColor(*colors[self.age - 1], 1.0)
         
         node.setBillboardPointEye()
+        # Always render on top of clearing/road/bushes
+        node.setBin("fixed", 30)
+        node.setDepthTest(False)
+        node.setDepthWrite(False)
         
         return node
     
@@ -105,12 +111,9 @@ class Monkey:
         new_x = self.position.x + movement.x
         new_y = self.position.z + movement.z
         
-        # Keep monkeys on edge - if they reach the end, reverse direction or despawn
-        # Use clearing boundaries (playable area) - updated to match new clearing size
-        clearing_width = 60.0  # Updated to match new clearing size
-        clearing_height = 30.0  # Updated to match new clearing size
-        edge_offset_x = clearing_width / 2
-        edge_offset_y = clearing_height / 2
+        # Keep monkeys on edge - if they reach the end, despawn (monkey goes into forest)
+        edge_offset_x = CLEARING_HALF_W
+        edge_offset_y = CLEARING_HALF_H
         
         if self.monkey_mode == "NorthSouth":
             # Monkeys walk along top/bottom edge (horizontal movement)
@@ -122,10 +125,11 @@ class Monkey:
                 else:
                     new_y = -edge_offset_y  # Bottom edge
             
-            # Check if reached end of edge
-            if new_x > clearing_width/2 or new_x < -clearing_width/2:
-                # Reached end - despawn (monkey goes into forest)
-                return "despawn"
+            # Despawn only when leaving path at the far end (monkeys spawn in forest at near end)
+            if self.move_direction.x > 0 and new_x > CLEARING_HALF_W:
+                return "despawn"  # Walked off right into forest
+            if self.move_direction.x < 0 and new_x < -CLEARING_HALF_W:
+                return "despawn"  # Walked off left into forest
         else:  # WestEast
             # Monkeys walk along left/right edge (vertical movement)
             # Keep x position on edge (left or right)
@@ -136,10 +140,11 @@ class Monkey:
                 else:
                     new_x = -edge_offset_x  # Left edge
             
-            # Check if reached end of edge
-            if new_y > clearing_height/2 or new_y < -clearing_height/2:
-                # Reached end - despawn
-                return "despawn"
+            # Despawn only when leaving path at the far end
+            if self.move_direction.z > 0 and new_y > CLEARING_HALF_H:
+                return "despawn"  # Walked off top into forest
+            if self.move_direction.z < 0 and new_y < -CLEARING_HALF_H:
+                return "despawn"  # Walked off bottom into forest
         
         # Apply movement
         self.position.x = new_x
@@ -147,19 +152,21 @@ class Monkey:
         # Keep Y at 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
         self.node.setPos(self.position.x, 1.0, self.position.z)
         
-        # Check if monkey is perpendicular to player (can throw)
-        # Monkey throws when it's directly across from player (perpendicular line)
+        # Throw only when perpendicular to monkey's path (player in same row/column band)
+        # Threshold 15 ≈ full playable height/width so monkeys shoot often when player is in range
+        PERPENDICULAR_THRESHOLD = 15.0
+        in_playable = (
+            abs(player_pos[0]) <= CLEARING_HALF_W - ROAD_WIDTH
+            and abs(player_pos[1]) <= CLEARING_HALF_H - ROAD_WIDTH
+        )
         can_throw = False
-        if self.monkey_mode == "NorthSouth":
-            # Monkeys walk along top/bottom edge (horizontal movement along x)
-            # Throw when player is at same z level (perpendicular - monkey's x line crosses player's z)
-            if abs(self.position.z - player_pos[1]) < 4.0:  # Close enough to be perpendicular
-                can_throw = True
-        else:  # WestEast
-            # Monkeys walk along left/right edge (vertical movement along z)
-            # Throw when player is at same x level (perpendicular - monkey's z line crosses player's x)
-            if abs(self.position.x - player_pos[0]) < 4.0:  # Close enough to be perpendicular
-                can_throw = True
+        if in_playable:
+            if self.monkey_mode == "NorthSouth":
+                if abs(self.position.z - player_pos[1]) < PERPENDICULAR_THRESHOLD:
+                    can_throw = True
+            else:  # WestEast
+                if abs(self.position.x - player_pos[0]) < PERPENDICULAR_THRESHOLD:
+                    can_throw = True
         
         # Update throwing cooldown
         self.throw_cooldown -= dt
@@ -172,12 +179,18 @@ class Monkey:
         return None
     
     def _throw_poop(self, player_pos: tuple):
-        """Throw poop at player (perpendicular throw from edge)"""
-        # Throw directly at player position with accuracy
-        target_x = player_pos[0] + random.uniform(-3, 3) * (1 - self.stats["accuracy"])
-        target_y = player_pos[1] + random.uniform(-3, 3) * (1 - self.stats["accuracy"])
-        
-        return Poop(self.base, self.position.x, self.position.z, target_x, target_y, self.stats["throw_speed"])
+        """Throw poop strictly perpendicular to path: from edge straight inward (no component along path)."""
+        accuracy_spread = random.uniform(-3, 3) * (1 - self.stats["accuracy"])
+        speed = self.base_poop_speed * self.stats["throw_speed"] * 0.8  # 20% slower
+        # NorthSouth: path is horizontal (along x). Perpendicular = straight in z (down from top, up from bottom).
+        if self.monkey_mode == "NorthSouth":
+            target_x = self.position.x  # same column — no horizontal component
+            target_y = player_pos[1] + accuracy_spread
+        # WestEast: path is vertical (along z). Perpendicular = straight in x (right from left, left from right).
+        else:
+            target_x = player_pos[0] + accuracy_spread
+            target_y = self.position.z  # same row — no vertical component
+        return Poop(self.base, self.position.x, self.position.z, target_x, target_y, speed)
     
     def cleanup(self):
         """Cleanup"""
@@ -243,11 +256,15 @@ class Poop:
             node.setColor(0.4, 0.25, 0.13, 1.0)  # Brown
         
         node.setBillboardPointEye()
+        # Render on top of clearing/road/bushes so poop is visible
+        node.setBin("fixed", 40)
+        node.setDepthTest(False)
+        node.setDepthWrite(False)
         
         return node
     
     def update(self, dt: float):
-        """Update poop position"""
+        """Update poop position. Poop that misses flies to forest and disappears."""
         if not self.is_alive:
             return
         
@@ -256,7 +273,12 @@ class Poop:
         # Keep Y at 1.0 to be above environment (background: 0.5, clearing: 0.6, forest: 0.7)
         self.node.setPos(self.position.x, 1.0, self.position.z)
         
-        # Lifetime
+        # Poop that reaches forest boundary disappears
+        if abs(self.position.x) > CLEARING_HALF_W or abs(self.position.z) > CLEARING_HALF_H:
+            self.is_alive = False
+            return
+        
+        # Lifetime fallback
         self.lifetime -= dt
         if self.lifetime <= 0:
             self.is_alive = False
@@ -289,19 +311,22 @@ class MinigameScene(BaseScene):
     # NorthSouth: monkeys walk from left and right edges (along top/bottom)
     # WestEast: monkeys walk from top and bottom edges (along left/right)
     
-    # Movement area bounds - player restricted to clearing (playable area)
-    # Using cave dimensions as base: clearing is 60x30, centered at (0, 0)
+    # Movement area bounds - player restricted to clearing minus road (cannot step on road)
+    # Clearing 60x30; road strip ROAD_WIDTH at edges; playable inner rect
     MOVEMENT_BOUNDS = {
-        "min_x": -30.0,  # Clearing width / 2 (60.0 / 2)
-        "max_x": 30.0,
-        "min_y": -15.0,   # Clearing height / 2 (30.0 / 2)
-        "max_y": 15.0
+        "min_x": -CLEARING_HALF_W + ROAD_WIDTH,
+        "max_x": CLEARING_HALF_W - ROAD_WIDTH,
+        "min_y": -CLEARING_HALF_H + ROAD_WIDTH,
+        "max_y": CLEARING_HALF_H - ROAD_WIDTH
     }
     
     def __init__(self, base, balance_config: dict):
         super().__init__(base, "Minigame")
         
         self.balance = balance_config["minigame"]
+        
+        # Poop base speed from config (throw_speed is multiplier; e.g. 300/15 = 20 units/sec base)
+        self._poop_base_speed = float(self.balance.get("poop", {}).get("speed", 300)) / 15.0
         
         # Game state
         self.monkeys = []
@@ -310,9 +335,14 @@ class MinigameScene(BaseScene):
         self.is_game_over = False
         self.monkey_mode = None  # "NorthSouth" or "WestEast" - determines monkey movement pattern
         
+        # Spawn: next group only when current group reached forest; size 1→2→…→5; cap 5 for 30s
+        self._spawn_group_size = 1
+        self._cap_5_until_time = None
+        
         # Visual elements
         self.clearing = None  # Поляна
         self.bushes = []  # Кусты
+        self.roads = []   # Road strips where monkeys walk (player cannot step on)
         
         # Create background
         self._create_background()
@@ -381,6 +411,9 @@ class MinigameScene(BaseScene):
         for bush in self.bushes:
             bush.removeNode()
         self.bushes.clear()
+        for road in self.roads:
+            road.removeNode()
+        self.roads.clear()
         
         # Clearing size - playable area using cave dimensions as base
         # Cave is -35 to 35 (width 70), -18 to 18 (height 36)
@@ -463,6 +496,9 @@ class MinigameScene(BaseScene):
         self.clearing.setDepthTest(False)  # Ensure visibility
         self.clearing.setDepthWrite(False)
         
+        # Create road strips where monkeys walk (player cannot step on road)
+        self._create_road(clearing_size_x, clearing_size_y)
+        
         # Create forest walls (bushes) - dark green forest boundaries
         # Try to load forest sprite
         forest_sprite_path = Path("assets/sprites/minigame/forest.png")
@@ -521,105 +557,99 @@ class MinigameScene(BaseScene):
         logger.info(f"Created clearing at center and {len(self.bushes)} bush areas for mode {monkey_mode}")
         logger.info(f"Clearing texture loaded: {clearing_texture is not None}, Forest texture loaded: {forest_texture is not None}")
     
-    def _spawn_monkeys(self):
-        """Spawn monkeys on edges - they will walk along the forest edge"""
-        # Clear existing
-        for monkey in self.monkeys:
-            monkey.cleanup()
-        self.monkeys.clear()
+    def _create_road(self, clearing_size_x: float, clearing_size_y: float):
+        """Create road strips at clearing edges where monkeys walk. Player cannot step on road."""
+        from pathlib import Path
+        from panda3d.core import TextureStage, Texture
         
-        # Get config
-        count = random.randint(self.balance["monkeys"]["count_min"], self.balance["monkeys"]["count_max"])
+        road_texture = None
+        road_path = Path("assets/sprites/minigame/road.png")
+        if road_path.exists():
+            try:
+                road_texture = self.base.loader.loadTexture(str(road_path))
+                road_texture.setWrapU(Texture.WMRepeat)
+                road_texture.setWrapV(Texture.WMRepeat)
+            except Exception as e:
+                logger.warning(f"Could not load road sprite: {e}")
+        
+        half_w = clearing_size_x / 2
+        half_h = clearing_size_y / 2
+        strips = [
+            # Top strip (x along width, z at top)
+            (0, half_h - ROAD_WIDTH / 2, clearing_size_x, ROAD_WIDTH),
+            # Bottom strip
+            (0, -half_h + ROAD_WIDTH / 2, clearing_size_x, ROAD_WIDTH),
+            # Left strip (z along height, x at left)
+            (-half_w + ROAD_WIDTH / 2, 0, ROAD_WIDTH, clearing_size_y),
+            # Right strip
+            (half_w - ROAD_WIDTH / 2, 0, ROAD_WIDTH, clearing_size_y),
+        ]
+        for i, (cx, cy, w, h) in enumerate(strips):
+            cm = CardMaker(f"road_{i}")
+            cm.setFrame(-w / 2, w / 2, -h / 2, h / 2)
+            road = self.base.render.attachNewNode(cm.generate())
+            road.setPos(cx, 0.62, cy)  # Just above clearing (0.6)
+            if road_texture:
+                ts = TextureStage("default")
+                road.setTexture(ts, road_texture)
+                road.setTexScale(ts, w / 32.0, h / 32.0)
+            else:
+                road.setColor(0.35, 0.3, 0.25, 1.0)  # Brown/gray road
+            road.setBillboardPointEye()
+            road.setTwoSided(True)
+            road.setBin("fixed", 11)
+            road.setDepthTest(False)
+            road.setDepthWrite(False)
+            self.roads.append(road)
+        logger.info(f"Created {len(self.roads)} road strips (player cannot step on road)")
+    
+    def _spawn_group(self, count: int):
+        """Spawn a group of monkeys in the forest; they walk out onto the path and along it. count 1–5."""
         distribution = self.balance["monkeys"]["age_distribution"]
         stats_by_age = self.balance["monkeys"]["stats_by_age"]
+        edge_offset_x = CLEARING_HALF_W - 0.5
+        edge_offset_y = CLEARING_HALF_H - 0.5
+        # Spawn inside forest (beyond clearing) so they "come out" onto the path
+        forest_offset = 2.5  # units into forest from clearing edge
         
-        # Generate ages based on distribution
-        ages = []
-        for age_str, prob in distribution.items():
-            age = int(age_str)
-            num = int(count * prob)
-            ages.extend([age] * num)
-        
-        # Fill to exact count
-        while len(ages) < count:
-            ages.append(random.choice([1, 2, 3, 4]))
-        
-        # Spawn monkeys on edges based on mode
-        # NorthSouth: monkeys spawn on left/right edges, walk along top/bottom
-        # WestEast: monkeys spawn on top/bottom edges, walk along left/right
-        # Use clearing boundaries (playable area) - updated to match new clearing size
-        clearing_width = 60.0  # Clearing width (updated)
-        clearing_height = 30.0  # Clearing height (updated)
-        edge_offset_x = clearing_width / 2 - 1  # Slightly inside clearing edge
-        edge_offset_y = clearing_height / 2 - 1  # Slightly inside clearing edge
-        
-        for i, age in enumerate(ages):
+        for _ in range(count):
+            rand = random.random()
+            cumulative = 0
+            age = 1
+            for age_str, prob in distribution.items():
+                cumulative += prob
+                if rand <= cumulative:
+                    age = int(age_str)
+                    break
             stats = stats_by_age[str(age)]
             
             if self.monkey_mode == "NorthSouth":
-                # Monkeys walk along top/bottom edges (horizontal movement)
-                # They spawn on left/right edge and walk horizontally
+                # Walk along top or bottom path; spawn at left or right end IN FOREST
                 edge_side = random.choice(["top", "bottom"])
-                x = random.uniform(-clearing_width/2, clearing_width/2)  # Random position along edge
+                start_side = random.choice(["left", "right"])
+                x = -(CLEARING_HALF_W + forest_offset) if start_side == "left" else (CLEARING_HALF_W + forest_offset)
                 y = edge_offset_y if edge_side == "top" else -edge_offset_y
+                # Direction: from spawn end toward the other end
+                initial_direction = (1, 0) if start_side == "left" else (-1, 0)
                 walk_direction = "horizontal"
-            else:  # WestEast
-                # Monkeys walk along left/right edges (vertical movement)
-                # They spawn on top/bottom edge and walk vertically
+            else:
+                # Walk along left or right path; spawn at top or bottom end IN FOREST
                 edge_side = random.choice(["left", "right"])
+                start_side = random.choice(["top", "bottom"])
                 x = edge_offset_x if edge_side == "right" else -edge_offset_x
-                y = random.uniform(-clearing_height/2, clearing_height/2)  # Random position along edge
+                y = (CLEARING_HALF_H + forest_offset) if start_side == "top" else -(CLEARING_HALF_H + forest_offset)
+                # Direction: from spawn end toward the other end
+                initial_direction = (0, -1) if start_side == "top" else (0, 1)
                 walk_direction = "vertical"
             
-            monkey = Monkey(self.base, age, (x, y), stats, walk_direction, self.monkey_mode)
+            monkey = Monkey(
+                self.base, age, (x, y), stats, walk_direction, self.monkey_mode,
+                base_poop_speed=self._poop_base_speed,
+                initial_direction=initial_direction
+            )
             self.monkeys.append(monkey)
         
-        logger.info(f"Spawned {count} monkeys on edges (mode: {self.monkey_mode})")
-    
-    def _spawn_single_monkey(self):
-        """Spawn a single monkey on edge (for continuous spawning)"""
-        if len(self.monkeys) >= self.balance["monkeys"]["count_max"]:
-            return  # Don't spawn if already at max
-        
-        distribution = self.balance["monkeys"]["age_distribution"]
-        stats_by_age = self.balance["monkeys"]["stats_by_age"]
-        
-        # Random age based on distribution
-        rand = random.random()
-        cumulative = 0
-        age = 1
-        for age_str, prob in distribution.items():
-            cumulative += prob
-            if rand <= cumulative:
-                age = int(age_str)
-                break
-        
-        stats = stats_by_age[str(age)]
-        field_size = 25
-        edge_offset = 22
-        
-        # Use clearing boundaries - updated to match new clearing size
-        clearing_width = 60.0  # Updated
-        clearing_height = 30.0  # Updated
-        edge_offset_x = clearing_width / 2 - 1
-        edge_offset_y = clearing_height / 2 - 1
-        
-        if self.monkey_mode == "NorthSouth":
-            # Walk along top/bottom edge (horizontal)
-            edge_side = random.choice(["top", "bottom"])
-            x = random.uniform(-clearing_width/2, clearing_width/2)
-            y = edge_offset_y if edge_side == "top" else -edge_offset_y
-            walk_direction = "horizontal"
-        else:  # WestEast
-            # Walk along left/right edge (vertical)
-            edge_side = random.choice(["left", "right"])
-            x = edge_offset_x if edge_side == "right" else -edge_offset_x
-            y = random.uniform(-clearing_height/2, clearing_height/2)
-            walk_direction = "vertical"
-        
-        monkey = Monkey(self.base, age, (x, y), stats, walk_direction, self.monkey_mode)
-        self.monkeys.append(monkey)
-        logger.debug(f"Spawned new monkey at ({x}, {y})")
+        logger.info(f"Spawned group of {count} monkeys from forest (mode: {self.monkey_mode}, total: {len(self.monkeys)})")
     
     def enter(self, player, monkey_mode: str = "NorthSouth"):
         """Enter minigame
@@ -639,11 +669,13 @@ class MinigameScene(BaseScene):
         # Player always spawns in center
         player.set_position(0, 0)
         
-        # Create clearing and bushes (always same - center clearing)
+        # Create clearing, road, and bushes (always same - center clearing)
         self._create_clearing_and_bushes(monkey_mode)
         
-        # Spawn monkeys on edges (they will walk along forest)
-        self._spawn_monkeys()
+        # Spawn: first group (1 monkey); next group only when current group all reached forest
+        self._spawn_group_size = 1
+        self._cap_5_until_time = None
+        self._spawn_group(1)  # First group: one monkey
         
         # Show background (lowest layer)
         if self.background:
@@ -663,7 +695,11 @@ class MinigameScene(BaseScene):
                 color = bush.getColor()
                 logger.info(f"Forest wall {i} shown at position ({pos.x}, {pos.y}, {pos.z}), hidden={bush.isHidden()}, color={color}")
         
-        logger.info(f"Minigame visual elements: background={self.background is not None}, clearing={self.clearing is not None}, bushes={len(self.bushes)}")
+        for road in self.roads:
+            if road:
+                road.show()
+        
+        logger.info(f"Minigame visual elements: background={self.background is not None}, clearing={self.clearing is not None}, bushes={len(self.bushes)}, roads={len(self.roads)}")
         
         # Show survival time in HUD
         if hasattr(self.base, 'hud'):
@@ -696,20 +732,22 @@ class MinigameScene(BaseScene):
         for monkey in self.monkeys:
             result = monkey.update(dt, player_pos)
             if result == "despawn":
-                # Monkey reached end and went into forest
                 monkeys_to_remove.append(monkey)
+                # When a monkey reaches forest, next group size increases (1 → 2 → … → 5)
+                self._spawn_group_size = min(self._spawn_group_size + 1, 5)
+                if self._spawn_group_size == 5 and self._cap_5_until_time is None:
+                    self._cap_5_until_time = self.game_time + 30.0
             elif result:  # It's a poop object
                 self.poops.append(result)
         
-        # Remove despawned monkeys
         for monkey in monkeys_to_remove:
             if monkey in self.monkeys:
                 monkey.cleanup()
                 self.monkeys.remove(monkey)
         
-        # Spawn new monkeys periodically to keep the game challenging
-        if random.random() < 0.01 * dt:  # Small chance each frame
-            self._spawn_single_monkey()
+        # Spawn next group only when current group has all reached the forest (no monkeys left)
+        if len(self.monkeys) == 0:
+            self._spawn_group(min(self._spawn_group_size, 5))
         
         # Update poops and check collisions
         for poop in self.poops[:]:
@@ -829,6 +867,8 @@ class MinigameScene(BaseScene):
             self.clearing.hide()
         for bush in self.bushes:
             bush.hide()
+        for road in self.roads:
+            road.hide()
     
     def cleanup(self):
         """Cleanup"""
