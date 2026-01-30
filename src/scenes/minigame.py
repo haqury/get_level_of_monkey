@@ -380,12 +380,8 @@ class MinigameScene(BaseScene):
                 forest_floor_texture.setWrapV(Texture.WMRepeat)
                 ts = TextureStage('default')
                 self.background.setTexture(ts, forest_floor_texture)
-                # Correct tile scale: frame is 70x36 units, sprite is 32x32 pixels
-                # Scale to tile properly (divide by sprite size)
-                # Correct tile scale: frame is 70x36 units, sprite is 32x32 pixels
-                # Match cave scaling: use same approach as cave (35.0, 18.0 for 70x36 frame)
-                # This tiles the texture properly across the full area
-                self.background.setTexScale(ts, 35.0, 18.0)  # Same as cave for consistency
+                # Tile texture: larger setTexScale = more repeats (frame 70x36 units)
+                self.background.setTexScale(ts, 70.0, 36.0)
                 logger.info(f"Loaded forest floor sprite from: {forest_floor_path}")
             except Exception as e:
                 logger.warning(f"Could not load forest floor sprite: {e}")
@@ -476,12 +472,12 @@ class MinigameScene(BaseScene):
         self.clearing.setPos(clearing_center[0], 0.6, clearing_center[1])  # Above background but below characters
         
         if clearing_texture:
-            # Apply tiled texture
+            # Apply tiled texture (repeat, not stretch): larger scale = more repeats
             ts = TextureStage('default')
             clearing_texture.setWrapU(Texture.WMRepeat)
             clearing_texture.setWrapV(Texture.WMRepeat)
             self.clearing.setTexture(ts, clearing_texture)
-            self.clearing.setTexScale(ts, clearing_size_x / 32.0, clearing_size_y / 32.0)
+            self.clearing.setTexScale(ts, clearing_size_x, clearing_size_y)
         else:
             # Fallback to color
             self.clearing.setColor(0.5, 0.7, 0.4, 1.0)  # Light green (clearing)
@@ -538,8 +534,8 @@ class MinigameScene(BaseScene):
                 forest_texture.setWrapU(Texture.WMRepeat)
                 forest_texture.setWrapV(Texture.WMRepeat)
                 bush.setTexture(ts, forest_texture)
-                # Tile texture appropriately
-                bush.setTexScale(ts, w / 32.0, h / 32.0)
+                # Tile texture (repeat): scale = size in world units
+                bush.setTexScale(ts, w, h)
             else:
                 # Very dark green for forest - more visible boundary
                 # Make it darker and more distinct
@@ -592,7 +588,7 @@ class MinigameScene(BaseScene):
             if road_texture:
                 ts = TextureStage("default")
                 road.setTexture(ts, road_texture)
-                road.setTexScale(ts, w / 32.0, h / 32.0)
+                road.setTexScale(ts, w, h)  # Tile texture (repeat)
             else:
                 road.setColor(0.35, 0.3, 0.25, 1.0)  # Brown/gray road
             road.setBillboardPointEye()
