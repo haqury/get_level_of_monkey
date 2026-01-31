@@ -41,11 +41,11 @@ class EnergySystem:
             return True
         return False
     
-    def update(self, dt: float):
-        """Восстановление энергии"""
+    def update(self, dt: float, regen_multiplier: float = 1.0):
+        """Восстановление энергии (regen_multiplier: 2.0 при сидении и т.п.)"""
         self.current_energy = min(
             self.max_energy,
-            self.current_energy + self.regen_rate * dt
+            self.current_energy + self.regen_rate * dt * regen_multiplier
         )
     
     def get_percentage(self) -> float:

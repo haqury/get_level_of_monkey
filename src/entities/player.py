@@ -36,6 +36,7 @@ class Player(DirectObject):
         # Animation state
         self.facing_direction = "down"  # up, down, left, right
         self.is_moving = False
+        self.is_sitting = False  # True when holding Space (sitting, 2x energy regen)
         
         logger.info(f"Player created at {pos}")
     

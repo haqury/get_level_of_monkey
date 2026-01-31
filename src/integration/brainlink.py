@@ -41,6 +41,15 @@ class BrainLinkClient:
     COMMAND_EVENT_CODE = 23
     COMMAND_TIMESTAMP = 24
     
+    # ML stats (optional, layout v2: 31 int32 = 124 bytes)
+    ML_CONFIDENCE = 25
+    ML_PROB_ML = 26
+    ML_PROB_MR = 27
+    ML_PROB_MU = 28
+    ML_PROB_MD = 29
+    ML_PROB_STOP = 30
+    ML_STATS_SIZE = 31 * 4  # 124 bytes
+    
     def __init__(self, memory_name: str = "brainlink_data"):
         """
         Initialize BrainLink client
@@ -132,6 +141,29 @@ class BrainLinkClient:
         
         byte_offset = offset * 4
         self.shm.buf[byte_offset:byte_offset + 4] = struct.pack('i', value)
+    
+    def get_ml_stats(self) -> tuple:
+        """
+        Get ML statistics from shared memory (confidence 0.0-1.0, dict of class probabilities).
+        Only valid if segment size >= 124 bytes (BrainLink Client with ML stats).
+        """
+        if not self.shm or not self.connected:
+            return (0.0, {})
+        try:
+            if len(self.shm.buf) < self.ML_STATS_SIZE:
+                return (0.0, {})
+            conf = self._read_int(self.ML_CONFIDENCE) / 1000.0
+            probs = {
+                "ml": self._read_int(self.ML_PROB_ML) / 1000.0,
+                "mr": self._read_int(self.ML_PROB_MR) / 1000.0,
+                "mu": self._read_int(self.ML_PROB_MU) / 1000.0,
+                "md": self._read_int(self.ML_PROB_MD) / 1000.0,
+                "stop": self._read_int(self.ML_PROB_STOP) / 1000.0,
+            }
+            return (max(0.0, min(1.0, conf)), probs)
+        except Exception as e:
+            logger.debug("get_ml_stats failed: %s", e)
+            return (0.0, {})
     
     def get_event(self) -> str:
         """
@@ -295,6 +327,38 @@ class BrainLinkClient:
             
         except Exception as e:
             logger.error(f"Error sending event for ML training: {e}")
+            return False
+    
+    def send_save_model_command(self) -> bool:
+        """
+        Ask BrainLink Client to save the ML model to the path from game config.
+        Client will re-read game_config.json brainlink.model_path and call save_model().
+        
+        Returns:
+            True if command sent successfully
+        """
+        if not self.connected:
+            logger.warning("Cannot send save model: not connected to BrainLink")
+            return False
+        
+        try:
+            import time
+            if self._read_int(self.COMMAND_PENDING) == 1:
+                time.sleep(0.002)
+                if self._read_int(self.COMMAND_PENDING) == 1:
+                    logger.debug("Previous command pending, skipping save model")
+                    return False
+            
+            self._write_int(self.COMMAND_TYPE, 3)  # 3 = save model to config path
+            self._write_int(self.COMMAND_EVENT_CODE, 0)
+            self._write_int(self.COMMAND_TIMESTAMP, 0)
+            self._write_int(self.COMMAND_PENDING, 1)
+            
+            logger.info("Sent save model command to BrainLink Client")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending save model command: {e}")
             return False
 
 

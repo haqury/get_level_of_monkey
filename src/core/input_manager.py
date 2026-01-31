@@ -144,6 +144,7 @@ class InputManager(DirectObject):
         Args:
             dt: Delta time
         """
+        self._current_ml_event = ""  # For HUD when BrainLink off
         # Get BrainLink input (if enabled)
         bl_event = ""
         if self.brainlink_enabled and self.brainlink:
@@ -157,6 +158,7 @@ class InputManager(DirectObject):
                 if hasattr(self, '_reconnect_logged'):
                     self._reconnect_logged = False
                 bl_event = self.brainlink.get_event()
+                self._current_ml_event = bl_event  # For HUD
                 # Log every event read (for debugging)
                 if bl_event and bl_event != self.last_bl_event:
                     logger.info(f"🎮 InputManager: BrainLink event read: '{bl_event}'")
@@ -275,6 +277,19 @@ class InputManager(DirectObject):
             True if BrainLink is providing movement input, False if keyboard
         """
         return getattr(self, '_is_using_brainlink', False)
+
+    def get_ml_display_info(self) -> tuple:
+        """
+        Get current ML model stats for HUD.
+        
+        Returns:
+            (prediction, connected, confidence, probs): prediction string, connection,
+            confidence 0.0-1.0, and dict of class probabilities (ml, mr, mu, md, stop)
+        """
+        pred = getattr(self, '_current_ml_event', "") or "—"
+        connected = self.brainlink.is_connected() if self.brainlink else False
+        confidence, probs = (0.0, {}) if not self.brainlink else self.brainlink.get_ml_stats()
+        return (pred, connected, confidence, probs)
     
     def cleanup(self):
         """Cleanup resources"""

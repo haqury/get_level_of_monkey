@@ -29,6 +29,7 @@ class HUD:
         self._create_energy_display()
         self._create_level_display()
         self._create_survival_time_display()
+        self._create_ml_display()
         
         logger.info("HUD initialized")
     
@@ -162,6 +163,73 @@ class HUD:
         # Hide by default (only show in minigame)
         self.survival_frame.hide()
     
+    def _create_ml_display(self):
+        """Create ML / BrainLink stats display (prediction, confidence, probs, connection)"""
+        self.ml_frame = DirectFrame(
+            frameColor=(0, 0, 0, 0),
+            frameSize=(0, 0.35, 0, 0.18),
+            pos=(0.65, 0, 0.9),
+            parent=self.hud_root
+        )
+        
+        self.ml_pred_label = DirectLabel(
+            text="ML: —",
+            text_scale=0.045,
+            text_fg=(0.9, 0.7, 1.0, 1),
+            text_align=TextNode.ALeft,
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, 0.12),
+            parent=self.ml_frame
+        )
+        
+        self.ml_conf_label = DirectLabel(
+            text="conf: —",
+            text_scale=0.038,
+            text_fg=(0.85, 0.85, 1.0, 1),
+            text_align=TextNode.ALeft,
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, 0.06),
+            parent=self.ml_frame
+        )
+        
+        self.ml_probs_label = DirectLabel(
+            text="ml:— mr:— mu:— md:—",
+            text_scale=0.032,
+            text_fg=(0.7, 0.7, 0.9, 1),
+            text_align=TextNode.ALeft,
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, -0.02),
+            parent=self.ml_frame
+        )
+        
+        self.ml_conn_label = DirectLabel(
+            text="BrainLink: off",
+            text_scale=0.036,
+            text_fg=(0.6, 0.6, 0.6, 1),
+            text_align=TextNode.ALeft,
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, -0.10),
+            parent=self.ml_frame
+        )
+    
+    def update_ml_display(self, prediction: str, connected: bool, confidence: float = 0.0, probs: dict = None):
+        """Update ML stats (prediction, confidence, per-class probs, connection)."""
+        self.ml_pred_label["text"] = f"ML: {prediction}"
+        if confidence > 0:
+            self.ml_conf_label["text"] = f"conf: {int(round(confidence * 100))}%"
+            self.ml_conf_label["text_fg"] = (0.3, 1.0, 0.5, 1) if confidence >= 0.5 else (1.0, 0.8, 0.2, 1)
+        else:
+            self.ml_conf_label["text"] = "conf: —"
+            self.ml_conf_label["text_fg"] = (0.7, 0.7, 0.8, 1)
+        probs = probs or {}
+        parts = []
+        for k in ("ml", "mr", "mu", "md"):
+            p = probs.get(k, 0)
+            parts.append(f"{k}:{int(round(p * 100))}")
+        self.ml_probs_label["text"] = " ".join(parts) if parts else "ml:— mr:— mu:— md:—"
+        self.ml_conn_label["text"] = "BrainLink: connected" if connected else "BrainLink: off"
+        self.ml_conn_label["text_fg"] = (0.3, 1.0, 0.5, 1) if connected else (0.6, 0.6, 0.6, 1)
+    
     def update_hp(self, current: int, maximum: int):
         """Update HP display"""
         self.hp_value_label['text'] = f"{current}/{maximum}"
@@ -227,12 +295,14 @@ class HUD:
         self.hp_frame.show()
         self.energy_frame.show()
         self.level_frame.show()
+        self.ml_frame.show()
     
     def hide(self):
         """Hide HUD"""
         self.hp_frame.hide()
         self.energy_frame.hide()
         self.level_frame.hide()
+        self.ml_frame.hide()
     
     def cleanup(self):
         """Cleanup HUD"""
@@ -240,3 +310,4 @@ class HUD:
         self.energy_frame.destroy()
         self.level_frame.destroy()
         self.survival_frame.destroy()
+        self.ml_frame.destroy()

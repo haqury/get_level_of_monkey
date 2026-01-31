@@ -21,7 +21,16 @@
     "send_keyboard_events": true,
     "send_to_history": true,
     "send_to_ml": true,
-    "send_brainlink_events": true
+    "send_brainlink_events": true,
+    "confidence_threshold": 0.5,
+    "prediction_weights": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "model_path": "C:/BLconfig/brainlink_classifier.pkl",
+    "stop_pauses_game": false
   },
   "controls": {
     "keyboard": {

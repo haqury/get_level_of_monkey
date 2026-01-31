@@ -3,7 +3,9 @@
 import logging
 import json
 from pathlib import Path
-from direct.gui.DirectGui import DirectButton, DirectLabel, DirectFrame
+from direct.gui.DirectGui import DirectButton, DirectLabel, DirectFrame, DirectEntry
+from tkinter import filedialog
+import tkinter as tk
 from direct.gui.OnscreenText import OnscreenText
 from panda3d.core import TextNode, CardMaker
 from src.scenes.base_scene import BaseScene
@@ -480,7 +482,7 @@ class MainMenuScene(BaseScene):
         """Create BrainLink settings tab"""
         self.brainlink_frame = DirectFrame(
             frameColor=(0, 0, 0, 0),
-            frameSize=(-0.55, 0.55, -0.4, 0.25),
+            frameSize=(-0.55, 0.55, -0.48, 0.25),
             pos=(0, 0, 0.05),
             parent=self.settings_frame
         )
@@ -490,12 +492,13 @@ class MainMenuScene(BaseScene):
         if hasattr(self.base, 'game_config'):
             bl_config = self.base.game_config.get("brainlink", {})
         
-        # BrainLink settings checkboxes
+        # BrainLink settings checkboxes (same style as other tabs: button as checkbox)
         settings = [
             ("Send Keyboard Events", "send_keyboard_events", 0.15, bl_config.get("send_keyboard_events", True)),
             ("Send to History", "send_to_history", 0.05, bl_config.get("send_to_history", True)),
             ("Send to ML Training", "send_to_ml", -0.05, bl_config.get("send_to_ml", True)),
-            ("Send BrainLink Events", "send_brainlink_events", -0.15, bl_config.get("send_brainlink_events", True))
+            ("Send BrainLink Events", "send_brainlink_events", -0.15, bl_config.get("send_brainlink_events", True)),
+            ("Stop pauses game", "stop_pauses_game", -0.20, bl_config.get("stop_pauses_game", False)),
         ]
         
         self.brainlink_checkboxes = {}
@@ -528,6 +531,174 @@ class MainMenuScene(BaseScene):
                 borderWidth=(0.003, 0.003)
             )
             self.brainlink_checkboxes[key] = checkbox
+        
+        # ML config: confidence threshold
+        DirectLabel(
+            text="Confidence threshold:",
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.4, 0, -0.28),
+            parent=self.brainlink_frame,
+            text_font=font,
+            text_align=TextNode.ALeft
+        )
+        thresh_val = bl_config.get("confidence_threshold", 0.5)
+        self.brainlink_threshold_entry = DirectEntry(
+            scale=0.032,
+            initialText=str(thresh_val),
+            numLines=1,
+            width=8,
+            pos=(0.1, 0, -0.28),
+            parent=self.brainlink_frame,
+            text_font=font,
+            focusInCommand=self._brainlink_entry_focus_in,
+            focusOutCommand=self._brainlink_apply_ml_config,
+            frameColor=(0.2, 0.2, 0.3, 1),
+            frameSize=(0, 0.25, -0.02, 0.02)
+        )
+        
+        # ML config: prediction weights (ml, mr, mu, md)
+        DirectLabel(
+            text="Weights (ml,mr,mu,md):",
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.4, 0, -0.36),
+            parent=self.brainlink_frame,
+            text_font=font,
+            text_align=TextNode.ALeft
+        )
+        weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
+        weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
+        self.brainlink_weights_entry = DirectEntry(
+            scale=0.03,
+            initialText=weights_str,
+            numLines=1,
+            width=18,
+            pos=(0.05, 0, -0.36),
+            parent=self.brainlink_frame,
+            text_font=font,
+            focusInCommand=self._brainlink_entry_focus_in,
+            focusOutCommand=self._brainlink_apply_ml_config,
+            frameColor=(0.2, 0.2, 0.3, 1),
+            frameSize=(0, 0.4, -0.02, 0.02)
+        )
+        
+        # Apply button for ML config
+        DirectButton(
+            text="Apply",
+            text_scale=0.03,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.25, 0.4, 0.25, 1),
+            frameSize=(-0.08, 0.08, -0.04, 0.04),
+            pos=(0.48, 0, -0.32),
+            command=self._brainlink_apply_ml_config,
+            parent=self.brainlink_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.003, 0.003)
+        )
+        
+        # Load / Save model buttons
+        DirectButton(
+            text="Load model",
+            text_scale=0.03,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.25, 0.25, 0.4, 1),
+            frameSize=(-0.12, 0.12, -0.04, 0.04),
+            pos=(-0.2, 0, -0.44),
+            command=self._brainlink_load_model,
+            parent=self.brainlink_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.003, 0.003)
+        )
+        DirectButton(
+            text="Save model",
+            text_scale=0.03,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.25, 0.4, 0.25, 1),
+            frameSize=(-0.12, 0.12, -0.04, 0.04),
+            pos=(0.2, 0, -0.44),
+            command=self._brainlink_save_model,
+            parent=self.brainlink_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.003, 0.003)
+        )
+    
+    def _brainlink_entry_focus_in(self, *args, **kwargs):
+        """Optional: clear placeholder on focus (no-op for now)."""
+        pass
+    
+    def _brainlink_apply_ml_config(self, *args, **kwargs):
+        """Read threshold and weights from entries and save to config."""
+        if not hasattr(self.base, 'game_config'):
+            return
+        bl_config = self.base.game_config.get("brainlink", {})
+        try:
+            thresh_text = self.brainlink_threshold_entry.get()
+            thresh = float(thresh_text.strip())
+            thresh = max(0.0, min(1.0, thresh))
+            bl_config["confidence_threshold"] = thresh
+        except (ValueError, TypeError):
+            pass
+        try:
+            weights_text = self.brainlink_weights_entry.get()
+            parts = [p.strip() for p in weights_text.split(",")]
+            weights = [float(x) for x in parts[:4]]
+            if len(weights) < 4:
+                weights.extend([1.0] * (4 - len(weights)))
+            bl_config["prediction_weights"] = weights[:4]
+        except (ValueError, TypeError):
+            pass
+        self.base.game_config["brainlink"] = bl_config
+        self._save_brainlink_config()
+        logger.info("BrainLink ML config (threshold, weights) applied and saved")
+    
+    def _brainlink_load_model(self):
+        """Open file dialog to choose model file; save path to config."""
+        root = tk.Tk()
+        root.withdraw()
+        path = filedialog.askopenfilename(
+            title="Load ML model",
+            filetypes=[("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")]
+        )
+        root.destroy()
+        if path:
+            if not hasattr(self.base, 'game_config'):
+                return
+            bl_config = self.base.game_config.get("brainlink", {})
+            bl_config["model_path"] = path
+            self.base.game_config["brainlink"] = bl_config
+            self._save_brainlink_config()
+            logger.info(f"BrainLink model path set (load): {path}")
+    
+    def _brainlink_save_model(self):
+        """Open file dialog to choose save location; save path to config."""
+        root = tk.Tk()
+        root.withdraw()
+        path = filedialog.asksaveasfilename(
+            title="Save ML model",
+            defaultextension=".pkl",
+            filetypes=[("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")]
+        )
+        root.destroy()
+        if path:
+            if not hasattr(self.base, 'game_config'):
+                return
+            bl_config = self.base.game_config.get("brainlink", {})
+            bl_config["model_path"] = path
+            self.base.game_config["brainlink"] = bl_config
+            self._save_brainlink_config()
+            logger.info(f"BrainLink model path set (save): {path}")
+            # Ask BrainLink Client to actually save the model to this path
+            if hasattr(self.base, 'input_manager') and self.base.input_manager.brainlink and self.base.input_manager.brainlink.is_connected():
+                if self.base.input_manager.brainlink.send_save_model_command():
+                    logger.info("Sent save model command to BrainLink Client")
+                else:
+                    logger.warning("Could not send save model command (BrainLink busy or not connected)")
     
     def _switch_settings_tab(self, tab_id: str):
         """Switch between settings tabs"""

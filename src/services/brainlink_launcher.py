@@ -234,14 +234,24 @@ class BrainLinkLauncher:
             return False
         
         try:
-            # Launch BrainLinkClient
+            # Launch BrainLinkClient with game config path so it can use
+            # brainlink.confidence_threshold, prediction_weights, model_path
+            game_config_path = Path("config/game_config.json")
+            if not game_config_path.is_absolute():
+                game_config_path = Path.cwd() / game_config_path
+            game_config_arg = str(game_config_path) if game_config_path.exists() else None
+            
             logger.info(f"Launching BrainLinkClient from: {self.brainlink_path}")
             
             # Use pythonw to avoid showing console window
             python_exe = "pythonw" if os.name == 'nt' else "python3"
             
+            cmd = [python_exe, str(main_py)]
+            if game_config_arg:
+                cmd.extend(["--game-config", game_config_arg])
+            
             self.process = subprocess.Popen(
-                [python_exe, str(main_py)],
+                cmd,
                 cwd=str(self.brainlink_path),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL

@@ -150,7 +150,7 @@ class Game(ShowBase):
         return {
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
             "player": {"initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
-            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False},
+            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": "", "stop_pauses_game": False},
             "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space"}}
         }
     
@@ -670,8 +670,27 @@ class Game(ShowBase):
         # Update input
         self.input_manager.update(dt)
         
-        # Update systems
-        self.energy_system.update(dt)
+        # Sitting: hold Space = sit, 2x energy regen, send "stop" to BrainLink
+        sitting = self.in_game and not self.dialog_box.is_visible and self.input_manager.is_action_pressed()
+        self.player.is_sitting = sitting
+        # Visual: squat when sitting
+        if sitting:
+            self.player.node.setScale(1, 1, 0.75)
+        else:
+            self.player.node.setScale(1, 1, 1)
+        regen_mult = 2.0 if sitting else 1.0
+        self.energy_system.update(dt, regen_multiplier=regen_mult)
+        
+        # While sitting, send "stop" to BrainLink for recording (throttled)
+        if sitting and self.input_manager.brainlink and self.input_manager.brainlink.is_connected():
+            if getattr(self.input_manager, 'send_brainlink_events', True) or getattr(self.input_manager, 'send_to_history', True):
+                import time
+                now = time.time()
+                if not hasattr(self, '_last_stop_sent_time'):
+                    self._last_stop_sent_time = 0.0
+                if now - self._last_stop_sent_time >= 0.5:
+                    if self.input_manager.brainlink.send_event_to_history("stop"):
+                        self._last_stop_sent_time = now
         
         # When pause menu is open: freeze game, don't update scene or movement
         if self.pause_menu.is_visible:
@@ -679,6 +698,8 @@ class Game(ShowBase):
                 self.hud.update_hp(self.health_system.current_hp, self.health_system.max_hp)
                 self.hud.update_energy(self.energy_system.get_percentage())
                 self.hud.update_level(self.progression_system.level)
+                pred, conn, conf, probs = self.input_manager.get_ml_display_info()
+                self.hud.update_ml_display(pred, conn, conf, probs)
             return task.cont
         
         # Update scene
@@ -686,7 +707,15 @@ class Game(ShowBase):
         
         # Process movement (only if in game and not in dialog)
         if self.in_game and not self.dialog_box.is_visible:
-            move_dir = self.input_manager.get_movement()
+            # Option: when BrainLink sends "stop" and config says so, pause the game
+            bl_event = getattr(self.input_manager, '_current_ml_event', '') or ''
+            if (self.input_manager.is_using_brainlink() and bl_event == 'stop' and
+                    self.game_config.get('brainlink', {}).get('stop_pauses_game', False)):
+                if not self.pause_menu.is_visible:
+                    self.pause_menu.show()
+            
+            # When sitting (Space held), no movement
+            move_dir = (0, 0) if sitting else self.input_manager.get_movement()
             
             # Debug logging for BrainLink movement
             if not hasattr(self, '_movement_debug_counter'):
@@ -788,6 +817,8 @@ class Game(ShowBase):
             self.hud.update_hp(self.health_system.current_hp, self.health_system.max_hp)
             self.hud.update_energy(self.energy_system.get_percentage())
             self.hud.update_level(self.progression_system.level)
+            pred, conn, conf, probs = self.input_manager.get_ml_display_info()
+            self.hud.update_ml_display(pred, conn, conf, probs)
         
         return task.cont
     
