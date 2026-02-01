@@ -2,6 +2,8 @@
 
 import logging
 import json
+import os
+import time
 from pathlib import Path
 from direct.gui.DirectGui import DirectButton, DirectLabel, DirectFrame, DirectEntry
 from tkinter import filedialog
@@ -306,14 +308,14 @@ class MainMenuScene(BaseScene):
         self._create_controls_tab(font)
         self._create_brainlink_tab(font)
         
-        # Close button
+        # Close button — на 1/6 экрана ниже (aspect2d: ~0.17 вниз)
         self.settings_close_btn = DirectButton(
             text="Close",
             text_scale=0.04,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.5, 0.2, 0.2, 1),
             frameSize=(-0.3, 0.3, -0.06, 0.06),
-            pos=(0, 0, -0.45),
+            pos=(0, 0, -0.62),
             command=self._on_settings_clicked,
             parent=self.settings_frame,
             text_font=font,
@@ -404,10 +406,10 @@ class MainMenuScene(BaseScene):
         self.btn_res_1920 = add_resolution_button("1920 x 1080 (Fullscreen)", 1920, 1080, True, -0.15)
     
     def _create_controls_tab(self, font):
-        """Create controls settings tab with cheater mode"""
+        """Create controls settings tab with cheater mode and keyboard rebind"""
         self.controls_frame = DirectFrame(
             frameColor=(0, 0, 0, 0),
-            frameSize=(-0.55, 0.55, -0.4, 0.25),
+            frameSize=(-0.55, 0.55, -0.52, 0.25),
             pos=(0, 0, 0.05),
             parent=self.settings_frame
         )
@@ -455,34 +457,114 @@ class MainMenuScene(BaseScene):
             borderWidth=(0.003, 0.003)
         )
         
-        # Controls configuration placeholder
-        DirectLabel(
-            text="Controls configuration",
-            text_scale=0.035,
-            text_fg=(0.7, 0.7, 0.7, 1),
-            frameColor=(0, 0, 0, 0),
-            pos=(0, 0, -0.1),
-            parent=self.controls_frame,
-            text_font=font,
-            text_align=TextNode.ACenter
-        )
+        # Keyboard layout: movement + sit + sit+pause
+        default_keys = {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}
+        controls_cfg = self.base.game_config.get("controls", {}).get("keyboard", default_keys) if hasattr(self.base, "game_config") else default_keys
+        key_labels = [
+            ("Up (move)", "up"),
+            ("Down (move)", "down"),
+            ("Left (move)", "left"),
+            ("Right (move)", "right"),
+            ("Sit (2x energy regen)", "action"),
+            ("Sit + Pause game", "sit_pause"),
+        ]
+        self.controls_key_buttons = {}
+        for i, (label, action) in enumerate(key_labels):
+            z = 0.05 - (i + 1) * 0.08
+            DirectLabel(
+                text=label + ":",
+                text_scale=0.032,
+                text_fg=(1, 1, 1, 1),
+                frameColor=(0, 0, 0, 0),
+                pos=(-0.45, 0, z),
+                parent=self.controls_frame,
+                text_font=font,
+                text_align=TextNode.ALeft
+            )
+            key_name = controls_cfg.get(action, default_keys.get(action, "?"))
+            btn = DirectButton(
+                text=self._key_display_name(key_name),
+                text_scale=0.028,
+                text_fg=(1, 1, 1, 1),
+                frameColor=(0.25, 0.25, 0.4, 1),
+                frameSize=(-0.2, 0.2, -0.035, 0.035),
+                pos=(0.15, 0, z),
+                command=self._start_rebind_key,
+                extraArgs=[action],
+                parent=self.controls_frame,
+                text_font=font,
+                relief=1,
+                borderWidth=(0.004, 0.004)
+            )
+            self.controls_key_buttons[action] = btn
         
-        DirectLabel(
-            text="(Coming soon)",
-            text_scale=0.028,
-            text_fg=(0.5, 0.5, 0.5, 1),
-            frameColor=(0, 0, 0, 0),
-            pos=(0, 0, -0.15),
-            parent=self.controls_frame,
-            text_font=font,
-            text_align=TextNode.ACenter
-        )
+        self._rebind_action = None
+        self.REBIND_KEYS = [
+            "arrow_up", "arrow_down", "arrow_left", "arrow_right",
+            "space", "w", "a", "s", "d", "p", "r", "t", "f", "g", "e", "q", "z", "x", "c", "v", "b", "n", "m",
+            "return", "backspace", "tab", "shift", "control", "alt",
+            "numpad2", "numpad4", "numpad6", "numpad8",
+        ]
+    
+    def _key_display_name(self, key_name: str) -> str:
+        """Human-readable key name for display."""
+        if not key_name:
+            return "?"
+        s = key_name.replace("arrow_", "").replace("-", " ").strip()
+        return s[:1].upper() + s[1:] if s else key_name
+    
+    def _start_rebind_key(self, action: str):
+        """Start listening for next key press to rebind."""
+        if self._rebind_action:
+            return
+        self._rebind_action = action
+        btn = self.controls_key_buttons.get(action)
+        if btn:
+            btn["text"] = "..."
+        for key in self.REBIND_KEYS:
+            self.base.accept(key, self._on_rebind_key, [key])
+    
+    def _on_rebind_key(self, key_name: str):
+        """Assign key to current action and stop listening."""
+        if not self._rebind_action:
+            return
+        action = self._rebind_action
+        self._rebind_action = None
+        for key in self.REBIND_KEYS:
+            self.base.ignore(key)
+        
+        if not hasattr(self.base, "game_config"):
+            return
+        ctrl = self.base.game_config.get("controls", {})
+        kbd = ctrl.get("keyboard", {})
+        kbd[action] = key_name
+        ctrl["keyboard"] = kbd
+        self.base.game_config["controls"] = ctrl
+        
+        try:
+            config_path = Path("config/game_config.json")
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                config.setdefault("controls", {})["keyboard"] = kbd
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save key config: %s", e)
+        
+        if hasattr(self.base, "input_manager") and self.base.input_manager:
+            self.base.input_manager.rebind_keys()
+        
+        btn = self.controls_key_buttons.get(action)
+        if btn:
+            btn["text"] = self._key_display_name(key_name)
+        logger.info("Key bound: %s -> %s", action, key_name)
     
     def _create_brainlink_tab(self, font):
         """Create BrainLink settings tab"""
         self.brainlink_frame = DirectFrame(
             frameColor=(0, 0, 0, 0),
-            frameSize=(-0.55, 0.55, -0.48, 0.25),
+            frameSize=(-0.55, 0.55, -0.56, 0.25),
             pos=(0, 0, 0.05),
             parent=self.settings_frame
         )
@@ -498,7 +580,6 @@ class MainMenuScene(BaseScene):
             ("Send to History", "send_to_history", 0.05, bl_config.get("send_to_history", True)),
             ("Send to ML Training", "send_to_ml", -0.05, bl_config.get("send_to_ml", True)),
             ("Send BrainLink Events", "send_brainlink_events", -0.15, bl_config.get("send_brainlink_events", True)),
-            ("Stop pauses game", "stop_pauses_game", -0.20, bl_config.get("stop_pauses_game", False)),
         ]
         
         self.brainlink_checkboxes = {}
@@ -515,91 +596,129 @@ class MainMenuScene(BaseScene):
                 text_align=TextNode.ALeft
             )
             
-            # Checkbox (using button as checkbox)
+            # Checkbox — явный квадрат с рамкой и галочкой
             checkbox = DirectButton(
-                text="✓" if default_value else " ",
-                text_scale=0.04,
-                text_fg=(0, 1, 0, 1) if default_value else (0.5, 0.5, 0.5, 1),
-                frameColor=(0.2, 0.2, 0.3, 1),
-                frameSize=(-0.05, 0.05, -0.04, 0.04),
+                text="+" if default_value else "",
+                text_scale=0.05,
+                text_fg=(0.9, 1, 0.9, 1) if default_value else (0.5, 0.5, 0.5, 1),
+                frameColor=(0.15, 0.4, 0.2, 1) if default_value else (0.22, 0.22, 0.28, 1),
+                frameSize=(-0.055, 0.055, -0.045, 0.045),
                 pos=(0.35, 0, z_pos),
                 command=self._toggle_brainlink_setting,
                 extraArgs=[key],
                 parent=self.brainlink_frame,
                 text_font=font,
-                relief=1,
-                borderWidth=(0.003, 0.003)
+                relief=2,
+                borderWidth=(0.008, 0.008)
             )
             self.brainlink_checkboxes[key] = checkbox
         
-        # ML config: confidence threshold
-        DirectLabel(
-            text="Confidence threshold:",
-            text_scale=0.032,
-            text_fg=(1, 1, 1, 1),
-            frameColor=(0, 0, 0, 0),
-            pos=(-0.4, 0, -0.28),
-            parent=self.brainlink_frame,
-            text_font=font,
-            text_align=TextNode.ALeft
+        # Значения — кнопки с текстом; по клику открывается диалог tkinter (нормальное поле ввода)
+        _btn_color = (0.4, 0.4, 0.55, 1.0)
+
+        def _row(label_text, z_pos, config_key, default_val, fmt=str, parse=lambda s: s, clamp=None):
+            val = bl_config.get(config_key, default_val)
+            disp = fmt(val)
+            DirectLabel(
+                text=label_text,
+                text_scale=0.032,
+                text_fg=(1, 1, 1, 1),
+                frameColor=(0, 0, 0, 0),
+                pos=(-0.4, 0, z_pos),
+                parent=self.brainlink_frame,
+                text_font=font,
+                text_align=TextNode.ALeft
+            )
+            btn = DirectButton(
+                text=disp,
+                text_scale=0.035,
+                text_fg=(1, 1, 1, 1),
+                frameColor=_btn_color,
+                frameSize=(0, 0.3, -0.035, 0.035),
+                pos=(0.08, 0, z_pos),
+                parent=self.brainlink_frame,
+                text_font=font,
+                relief=2,
+                borderWidth=(0.01, 0.01),
+                text_align=TextNode.ALeft,
+                command=self._brainlink_edit_value,
+                extraArgs=[config_key, default_val, fmt, parse, clamp, z_pos]
+            )
+            return btn
+
+        # Confidence threshold
+        self.brainlink_threshold_btn = _row(
+            "Confidence threshold:", -0.26, "confidence_threshold", 0.5,
+            fmt=lambda x: f"{float(x):.2f}",
+            parse=lambda s: float(s.strip().replace(",", ".")),
+            clamp=(0.0, 1.0)
         )
-        thresh_val = bl_config.get("confidence_threshold", 0.5)
-        self.brainlink_threshold_entry = DirectEntry(
-            scale=0.032,
-            initialText=str(thresh_val),
-            numLines=1,
-            width=8,
-            pos=(0.1, 0, -0.28),
-            parent=self.brainlink_frame,
-            text_font=font,
-            focusInCommand=self._brainlink_entry_focus_in,
-            focusOutCommand=self._brainlink_apply_ml_config,
-            frameColor=(0.2, 0.2, 0.3, 1),
-            frameSize=(0, 0.25, -0.02, 0.02)
+        # Min confidence
+        self.brainlink_min_confidence_btn = _row(
+            "Min confidence (limited speed):", -0.32, "min_confidence", 0.25,
+            fmt=lambda x: f"{float(x):.2f}",
+            parse=lambda s: float(s.strip().replace(",", ".")),
+            clamp=(0.0, 1.0)
         )
-        
-        # ML config: prediction weights (ml, mr, mu, md)
+        # Full confidence
+        self.brainlink_full_confidence_btn = _row(
+            "Full confidence (max speed):", -0.38, "full_confidence", 0.7,
+            fmt=lambda x: f"{float(x):.2f}",
+            parse=lambda s: float(s.strip().replace(",", ".")),
+            clamp=(0.0, 1.0)
+        )
+        # Weights
+        weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
+        weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
+
         DirectLabel(
             text="Weights (ml,mr,mu,md):",
             text_scale=0.032,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
-            pos=(-0.4, 0, -0.36),
+            pos=(-0.4, 0, -0.44),
             parent=self.brainlink_frame,
             text_font=font,
             text_align=TextNode.ALeft
         )
-        weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
-        weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
-        self.brainlink_weights_entry = DirectEntry(
-            scale=0.03,
-            initialText=weights_str,
-            numLines=1,
-            width=18,
-            pos=(0.05, 0, -0.36),
+
+        def _parse_weights(s):
+            parts = [p.strip().replace(",", ".") for p in s.split(",")]
+            return [float(x) for x in parts[:4]]
+
+        def _fmt_weights(w):
+            return ", ".join(str(round(x, 2)) for x in (w + [1.0] * 4)[:4])
+
+        self.brainlink_weights_btn = DirectButton(
+            text=weights_str,
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=_btn_color,
+            frameSize=(0, 0.48, -0.035, 0.035),
+            pos=(0.05, 0, -0.44),
             parent=self.brainlink_frame,
             text_font=font,
-            focusInCommand=self._brainlink_entry_focus_in,
-            focusOutCommand=self._brainlink_apply_ml_config,
-            frameColor=(0.2, 0.2, 0.3, 1),
-            frameSize=(0, 0.4, -0.02, 0.02)
+            relief=2,
+            borderWidth=(0.01, 0.01),
+            text_align=TextNode.ALeft,
+            command=self._brainlink_edit_weights,
+            extraArgs=[]
         )
-        
-        # Apply button for ML config
+
         DirectButton(
             text="Apply",
             text_scale=0.03,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.25, 0.4, 0.25, 1),
             frameSize=(-0.08, 0.08, -0.04, 0.04),
-            pos=(0.48, 0, -0.32),
+            pos=(0.48, 0, -0.40),
             command=self._brainlink_apply_ml_config,
             parent=self.brainlink_frame,
             text_font=font,
             relief=1,
             borderWidth=(0.003, 0.003)
         )
-        
+
         # Load / Save model buttons
         DirectButton(
             text="Load model",
@@ -607,7 +726,7 @@ class MainMenuScene(BaseScene):
             text_fg=(1, 1, 1, 1),
             frameColor=(0.25, 0.25, 0.4, 1),
             frameSize=(-0.12, 0.12, -0.04, 0.04),
-            pos=(-0.2, 0, -0.44),
+            pos=(-0.2, 0, -0.52),
             command=self._brainlink_load_model,
             parent=self.brainlink_frame,
             text_font=font,
@@ -620,7 +739,7 @@ class MainMenuScene(BaseScene):
             text_fg=(1, 1, 1, 1),
             frameColor=(0.25, 0.4, 0.25, 1),
             frameSize=(-0.12, 0.12, -0.04, 0.04),
-            pos=(0.2, 0, -0.44),
+            pos=(0.2, 0, -0.52),
             command=self._brainlink_save_model,
             parent=self.brainlink_frame,
             text_font=font,
@@ -628,34 +747,151 @@ class MainMenuScene(BaseScene):
             borderWidth=(0.003, 0.003)
         )
     
-    def _brainlink_entry_focus_in(self, *args, **kwargs):
-        """Optional: clear placeholder on focus (no-op for now)."""
-        pass
-    
-    def _brainlink_apply_ml_config(self, *args, **kwargs):
-        """Read threshold and weights from entries and save to config."""
+    def _brainlink_edit_value(self, config_key, default_val, fmt, parse, clamp, z_pos):
+        """Редактирование значения прямо в игре: скрыть кнопку, показать DirectEntry на том же месте."""
         if not hasattr(self.base, 'game_config'):
             return
+        if getattr(self, "_inline_edit", None):
+            return  # уже редактируем
         bl_config = self.base.game_config.get("brainlink", {})
-        try:
-            thresh_text = self.brainlink_threshold_entry.get()
-            thresh = float(thresh_text.strip())
-            thresh = max(0.0, min(1.0, thresh))
-            bl_config["confidence_threshold"] = thresh
-        except (ValueError, TypeError):
-            pass
-        try:
-            weights_text = self.brainlink_weights_entry.get()
-            parts = [p.strip() for p in weights_text.split(",")]
-            weights = [float(x) for x in parts[:4]]
-            if len(weights) < 4:
-                weights.extend([1.0] * (4 - len(weights)))
-            bl_config["prediction_weights"] = weights[:4]
-        except (ValueError, TypeError):
-            pass
-        self.base.game_config["brainlink"] = bl_config
+        current = bl_config.get(config_key, default_val)
+        btn_map = {
+            "confidence_threshold": self.brainlink_threshold_btn,
+            "min_confidence": self.brainlink_min_confidence_btn,
+            "full_confidence": self.brainlink_full_confidence_btn,
+        }
+        btn = btn_map.get(config_key)
+        if not btn:
+            return
+        btn.hide()
+        _btn_color = (0.4, 0.4, 0.55, 1.0)
+        font = self.base.cyrillic_font if hasattr(self.base, 'cyrillic_font') and self.base.cyrillic_font else None
+        entry = DirectEntry(
+            scale=0.035,
+            initialText=fmt(current),
+            numLines=1,
+            width=12,
+            pos=(0.08, 0, z_pos),
+            parent=self.brainlink_frame,
+            text_font=font,
+            frameColor=_btn_color,
+            frameSize=(0, 0.3, -0.035, 0.035),
+            relief=2,
+            borderWidth=(0.01, 0.01),
+            text_fg=(1, 1, 1, 1),
+            focus=1,
+            cursorKeys=1,
+            command=self._apply_inline_edit,
+            focusOutCommand=self._apply_inline_edit,
+        )
+        entry.setBin("fixed", 60)
+        self._inline_edit = {
+            "entry": entry,
+            "btn": btn,
+            "config_key": config_key,
+            "default_val": default_val,
+            "fmt": fmt,
+            "parse": parse,
+            "clamp": clamp,
+            "weights": False,
+        }
+        self.base.accept("escape", self._cancel_inline_edit)
+
+    def _brainlink_edit_weights(self):
+        """Редактирование весов прямо в игре: скрыть кнопку, показать DirectEntry на том же месте."""
+        if not hasattr(self.base, 'game_config'):
+            return
+        if getattr(self, "_inline_edit", None):
+            return
+        bl_config = self.base.game_config.get("brainlink", {})
+        weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
+        current_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
+        self.brainlink_weights_btn.hide()
+        _btn_color = (0.4, 0.4, 0.55, 1.0)
+        font = self.base.cyrillic_font if hasattr(self.base, 'cyrillic_font') and self.base.cyrillic_font else None
+        entry = DirectEntry(
+            scale=0.032,
+            initialText=current_str,
+            numLines=1,
+            width=18,
+            pos=(0.05, 0, -0.44),
+            parent=self.brainlink_frame,
+            text_font=font,
+            frameColor=_btn_color,
+            frameSize=(0, 0.48, -0.035, 0.035),
+            relief=2,
+            borderWidth=(0.01, 0.01),
+            text_fg=(1, 1, 1, 1),
+            focus=1,
+            cursorKeys=1,
+            command=self._apply_inline_edit,
+            focusOutCommand=self._apply_inline_edit,
+        )
+        entry.setBin("fixed", 60)
+        self._inline_edit = {
+            "entry": entry,
+            "btn": self.brainlink_weights_btn,
+            "weights": True,
+        }
+        self.base.accept("escape", self._cancel_inline_edit)
+
+    def _apply_inline_edit(self, *args, **kwargs):
+        """Применить введённое значение (Enter или потеря фокуса), скрыть entry, показать кнопку."""
+        edit = getattr(self, "_inline_edit", None)
+        if not edit:
+            return
+        entry = edit["entry"]
+        btn = edit["btn"]
+        new_str = entry.get().strip()
+        entry.destroy()
+        btn.show()
+        self._inline_edit = None
+        self.base.ignore("escape")
+        if not new_str:
+            return
+        if edit.get("weights"):
+            try:
+                parts = [p.strip().replace(",", ".") for p in new_str.split(",")]
+                vals = [float(x) for x in parts[:4]]
+                if len(vals) < 4:
+                    vals.extend([1.0] * (4 - len(vals)))
+                bl_config = self.base.game_config.get("brainlink", {})
+                bl_config["prediction_weights"] = vals[:4]
+                self.base.game_config["brainlink"] = bl_config
+                btn["text"] = ", ".join(str(round(x, 2)) for x in vals[:4])
+                self._save_brainlink_config()
+                logger.info("BrainLink weights updated: %s", vals[:4])
+            except (ValueError, TypeError) as e:
+                logger.warning("Invalid weights: %s", e)
+        else:
+            try:
+                val = edit["parse"](new_str)
+                if edit.get("clamp"):
+                    a, b = edit["clamp"]
+                    val = max(a, min(b, val))
+                bl_config = self.base.game_config.get("brainlink", {})
+                bl_config[edit["config_key"]] = val
+                self.base.game_config["brainlink"] = bl_config
+                btn["text"] = edit["fmt"](val)
+                self._save_brainlink_config()
+                logger.info("BrainLink config updated: %s = %s", edit["config_key"], val)
+            except (ValueError, TypeError) as e:
+                logger.warning("Invalid value: %s", e)
+
+    def _cancel_inline_edit(self):
+        """Отменить редактирование (Escape): скрыть entry, показать кнопку."""
+        edit = getattr(self, "_inline_edit", None)
+        if not edit:
+            return
+        edit["entry"].destroy()
+        edit["btn"].show()
+        self._inline_edit = None
+        self.base.ignore("escape")
+
+    def _brainlink_apply_ml_config(self, *args, **kwargs):
+        """Сохранить конфиг BrainLink в файл (значения уже в config после редактирования)."""
         self._save_brainlink_config()
-        logger.info("BrainLink ML config (threshold, weights) applied and saved")
+        logger.info("BrainLink config saved")
     
     def _brainlink_load_model(self):
         """Open file dialog to choose model file; save path to config."""
@@ -676,29 +912,39 @@ class MainMenuScene(BaseScene):
             logger.info(f"BrainLink model path set (load): {path}")
     
     def _brainlink_save_model(self):
-        """Open file dialog to choose save location; save path to config."""
+        """Open file dialog to choose save location; save path to config; ask BrainLink to save model."""
         root = tk.Tk()
         root.withdraw()
         path = filedialog.asksaveasfilename(
             title="Save ML model",
             defaultextension=".pkl",
-            filetypes=[("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")]
+            filetypes=[("Pickle model", "*.pkl"), ("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")]
         )
         root.destroy()
         if path:
             if not hasattr(self.base, 'game_config'):
                 return
+            # Use absolute path so BrainLink Client can save to the same path
+            path_abs = str(Path(path).resolve())
             bl_config = self.base.game_config.get("brainlink", {})
-            bl_config["model_path"] = path
+            bl_config["model_path"] = path_abs
             self.base.game_config["brainlink"] = bl_config
             self._save_brainlink_config()
-            logger.info(f"BrainLink model path set (save): {path}")
-            # Ask BrainLink Client to actually save the model to this path
+            logger.info(f"BrainLink model path set (save): {path_abs}")
+            # Записать путь к game_config.json в известный файл, чтобы BrainLink мог прочитать конфиг даже без --game-config
+            _game_config_path = Path("config/game_config.json").resolve()
+            _brainlink_config_dir = Path(os.environ.get("APPDATA", os.path.expanduser("~"))) / "BrainLink"
+            _brainlink_config_dir.mkdir(parents=True, exist_ok=True)
+            (_brainlink_config_dir / "game_config_path.txt").write_text(str(_game_config_path), encoding="utf-8")
+            # Ensure config is written to disk before client reads it
+            time.sleep(0.15)
             if hasattr(self.base, 'input_manager') and self.base.input_manager.brainlink and self.base.input_manager.brainlink.is_connected():
                 if self.base.input_manager.brainlink.send_save_model_command():
                     logger.info("Sent save model command to BrainLink Client")
                 else:
                     logger.warning("Could not send save model command (BrainLink busy or not connected)")
+            else:
+                logger.warning("BrainLink not connected — start BrainLink Client to save the model.")
     
     def _switch_settings_tab(self, tab_id: str):
         """Switch between settings tabs"""
@@ -739,8 +985,9 @@ class MainMenuScene(BaseScene):
         
         # Update checkbox display
         checkbox = self.brainlink_checkboxes[key]
-        checkbox['text'] = "✓" if new_value else " "
-        checkbox['text_fg'] = (0, 1, 0, 1) if new_value else (0.5, 0.5, 0.5, 1)
+        checkbox['text'] = "+" if new_value else ""
+        checkbox['text_fg'] = (0.9, 1, 0.9, 1) if new_value else (0.5, 0.5, 0.5, 1)
+        checkbox['frameColor'] = (0.15, 0.4, 0.2, 1) if new_value else (0.22, 0.22, 0.28, 1)
         
         # Update InputManager if it exists
         if hasattr(self.base, 'input_manager'):
@@ -789,23 +1036,26 @@ class MainMenuScene(BaseScene):
         self._save_game_config()
     
     def _save_game_config(self):
-        """Save game config to game_config.json"""
+        """Save game config to game_config.json (create file and dir if missing)."""
         try:
             config_path = Path("config/game_config.json")
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config = {}
             if config_path.exists():
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                
-                # Update all config sections
-                if "brainlink" in self.base.game_config:
-                    config["brainlink"] = self.base.game_config["brainlink"]
-                if "player" in self.base.game_config:
-                    config["player"] = self.base.game_config["player"]
-                
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(config, f, indent=2)
-                
-                logger.info(f"Saved game config to {config_path}")
+            # Merge in current in-memory config
+            if "brainlink" in self.base.game_config:
+                config["brainlink"] = self.base.game_config["brainlink"]
+            if "player" in self.base.game_config:
+                config["player"] = self.base.game_config["player"]
+            if "controls" in self.base.game_config:
+                config["controls"] = self.base.game_config["controls"]
+            if "window" in self.base.game_config:
+                config["window"] = self.base.game_config["window"]
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+            logger.info(f"Saved game config to {config_path}")
         except Exception as e:
             logger.error(f"Failed to save game config: {e}")
 

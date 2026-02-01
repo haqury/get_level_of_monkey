@@ -107,6 +107,7 @@ class Game(ShowBase):
         
         # Input callbacks
         self.input_manager.on_action = self.on_action_pressed
+        self.input_manager.on_sit_pause = self._on_sit_pause
         
         # Setup game loop
         self.taskMgr.add(self.update, "game_update")
@@ -150,8 +151,8 @@ class Game(ShowBase):
         return {
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
             "player": {"initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
-            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": "", "stop_pauses_game": False},
-            "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space"}}
+            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "min_confidence": 0.25, "full_confidence": 0.7, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": ""},
+            "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}}
         }
     
     def _configure_panda3d(self):
@@ -602,6 +603,15 @@ class Game(ShowBase):
         else:
             self.pause_menu.show()
     
+    def _on_sit_pause(self):
+        """Sit + pause game (key from Controls: sit_pause)."""
+        if not self.in_game:
+            return
+        if self.dialog_box.is_visible:
+            return
+        if not self.pause_menu.is_visible:
+            self.pause_menu.show()
+    
     def _on_pause_restart(self):
         """Restart current stage (minigame)."""
         self.pause_menu.hide()
@@ -707,13 +717,6 @@ class Game(ShowBase):
         
         # Process movement (only if in game and not in dialog)
         if self.in_game and not self.dialog_box.is_visible:
-            # Option: when BrainLink sends "stop" and config says so, pause the game
-            bl_event = getattr(self.input_manager, '_current_ml_event', '') or ''
-            if (self.input_manager.is_using_brainlink() and bl_event == 'stop' and
-                    self.game_config.get('brainlink', {}).get('stop_pauses_game', False)):
-                if not self.pause_menu.is_visible:
-                    self.pause_menu.show()
-            
             # When sitting (Space held), no movement
             move_dir = (0, 0) if sitting else self.input_manager.get_movement()
             
@@ -723,39 +726,46 @@ class Game(ShowBase):
             self._movement_debug_counter += 1
             
             is_brainlink = self.input_manager.is_using_brainlink()
-            if is_brainlink and move_dir != (0, 0) and self._movement_debug_counter % 60 == 0:
-                logger.info(f"🎮 Game: BrainLink movement detected - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f})")
+            # BrainLink speed scale by confidence: below min = no move, min..full = limited speed, >= full = max speed
+            brainlink_speed_mult = 1.0
+            if is_brainlink and move_dir != (0, 0):
+                _, _, conf, _ = self.input_manager.get_ml_display_info()
+                bl_cfg = self.game_config.get("brainlink", {})
+                min_c = bl_cfg.get("min_confidence", 0.25)
+                full_c = bl_cfg.get("full_confidence", 0.7)
+                if conf < min_c:
+                    move_dir = (0, 0)
+                    brainlink_speed_mult = 0.0
+                elif conf >= full_c:
+                    brainlink_speed_mult = 1.0
+                else:
+                    brainlink_speed_mult = (conf - min_c) / (full_c - min_c) if full_c > min_c else 1.0
+                if move_dir != (0, 0) and self._movement_debug_counter % 60 == 0:
+                    logger.info(f"🎮 Game: BrainLink movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), conf={conf:.2f}, speed_mult={brainlink_speed_mult:.2f}")
             
             if move_dir != (0, 0):
                 # Get current scene for movement restrictions
                 current_scene = self.scene_manager.get_current_scene()
                 
-                # No movement restrictions - player can move freely in minigame
+                # Only spend energy if using keyboard (not BrainLink)
+                should_spend_energy = not self.input_manager.is_using_brainlink()
                 
-                if move_dir != (0, 0):
-                    # Only spend energy if using keyboard (not BrainLink)
-                    should_spend_energy = not self.input_manager.is_using_brainlink()
-                    
-                    if should_spend_energy:
-                        # Try to spend energy (only for keyboard movement)
-                        # In cheater mode, spend() always returns True
-                        if self.energy_system.spend(self.move_cost * dt):
-                            # Get movement bounds from current scene if in minigame
-                            bounds = None
-                            if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
-                                bounds = current_scene.MOVEMENT_BOUNDS
-                            # Check collisions before moving
-                            self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
-                    else:
-                        # BrainLink movement - no energy cost, just move
-                        # Get movement bounds from current scene if in minigame
+                if should_spend_energy:
+                    # Try to spend energy (only for keyboard movement)
+                    if self.energy_system.spend(self.move_cost * dt):
                         bounds = None
                         if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
                             bounds = current_scene.MOVEMENT_BOUNDS
-                        # Check collisions before moving
-                        if self._movement_debug_counter % 60 == 0:
-                            logger.info(f"🎮 Game: Applying BrainLink movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), speed={self.player_speed}")
                         self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
+                else:
+                    # BrainLink movement: speed scaled by confidence (min_confidence..full_confidence)
+                    effective_speed = self.player_speed * brainlink_speed_mult
+                    bounds = None
+                    if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
+                        bounds = current_scene.MOVEMENT_BOUNDS
+                    if self._movement_debug_counter % 60 == 0:
+                        logger.info(f"🎮 Game: BrainLink movement - speed={effective_speed:.2f} (mult={brainlink_speed_mult:.2f})")
+                    self.player.move(move_dir[0], move_dir[1], dt, effective_speed, bounds, current_scene)
             
             # Check for automatic scene transitions (exits work automatically)
             # Only check if dialog is not visible (to prevent spam)

@@ -63,18 +63,24 @@ class InputManager(DirectObject):
         
         # Callbacks
         self.on_action: Optional[Callable] = None
+        self.on_sit_pause: Optional[Callable] = None  # Sit + pause game
         
-        # Keyboard state
+        # Keyboard state (internal names: up, down, left, right, action, sit_pause)
         self.keys = {
             "up": False,
             "down": False,
             "left": False,
             "right": False,
-            "space": False,
+            "action": False,
+            "sit_pause": False,
         }
         
-        # Setup keyboard bindings
-        self._setup_keyboard()
+        # Key bindings: internal_name -> Panda3D key name (from config)
+        self._key_bindings: dict = {}
+        self._bound_keys: list = []  # list of (key_name, internal_name) for unbind
+        
+        # Setup keyboard bindings from config
+        self._apply_key_bindings()
         
         # Last BrainLink event
         self.last_bl_event = ""
@@ -100,42 +106,52 @@ class InputManager(DirectObject):
         
         logger.info(f"🎮 InputManager initialized (BrainLink: {brainlink_enabled}, send_keyboard: {self.send_keyboard_events}, brainlink_obj: {self.brainlink is not None})")
     
-    def _setup_keyboard(self):
-        """Setup keyboard event handlers"""
-        # Movement keys
-        self.accept("arrow_up", self._on_key, ["up", True])
-        self.accept("arrow_up-up", self._on_key, ["up", False])
+    def _get_keyboard_config(self) -> dict:
+        """Get keyboard config (internal_name -> key name)."""
+        default = {
+            "up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right",
+            "action": "space", "sit_pause": "p",
+        }
+        if hasattr(self.base, "game_config"):
+            return self.base.game_config.get("controls", {}).get("keyboard", default)
+        return default
+    
+    def _apply_key_bindings(self):
+        """Apply key bindings from config (unbind old, bind new)."""
+        for key_name, _ in self._bound_keys:
+            self.ignore(key_name)
+            self.ignore(key_name + "-up")
+        self._bound_keys.clear()
+        self.ignore("escape")
         
-        self.accept("arrow_down", self._on_key, ["down", True])
-        self.accept("arrow_down-up", self._on_key, ["down", False])
+        self._key_bindings = self._get_keyboard_config()
+        # Normalize: support old "space" as action
+        if "space" in self._key_bindings and "action" not in self._key_bindings:
+            self._key_bindings["action"] = self._key_bindings.get("space", "space")
         
-        self.accept("arrow_left", self._on_key, ["left", True])
-        self.accept("arrow_left-up", self._on_key, ["left", False])
+        for internal, key_name in self._key_bindings.items():
+            if not key_name or internal == "space":
+                continue
+            self.accept(key_name, self._on_key, [internal, True])
+            self.accept(key_name + "-up", self._on_key, [internal, False])
+            self._bound_keys.append((key_name, internal))
         
-        self.accept("arrow_right", self._on_key, ["right", True])
-        self.accept("arrow_right-up", self._on_key, ["right", False])
-        
-        # Action key
-        self.accept("space", self._on_key, ["space", True])
-        self.accept("space-up", self._on_key, ["space", False])
-        
-        # Escape — pause menu (forward to game)
         self.accept("escape", self._on_escape_key)
-        
-        logger.debug("Keyboard bindings set up")
+        logger.debug("Keyboard bindings applied: %s", self._key_bindings)
     
     def _on_escape_key(self):
         """Escape key — open pause menu if in game."""
         if hasattr(self.base, "_on_escape"):
             self.base._on_escape()
     
-    def _on_key(self, key: str, pressed: bool):
-        """Handle keyboard event"""
-        self.keys[key] = pressed
+    def _on_key(self, internal: str, pressed: bool):
+        """Handle keyboard event (internal name: up, down, left, right, action, sit_pause)."""
+        self.keys[internal] = pressed
         
-        # Trigger action callback
-        if key == "space" and pressed and self.on_action:
+        if internal == "action" and pressed and self.on_action:
             self.on_action()
+        if internal == "sit_pause" and pressed and self.on_sit_pause:
+            self.on_sit_pause()
     
     def update(self, dt: float):
         """
@@ -180,7 +196,7 @@ class InputManager(DirectObject):
         # Calculate movement direction
         x, y = 0, 0
         
-        # Keyboard has priority over BrainLink
+        # Keyboard has priority over BrainLink; if keyboard contradicts current ML event, ML priority is reduced (use keyboard)
         keyboard_event = ""
         if self.keys["left"]:
             x -= 1
@@ -195,7 +211,7 @@ class InputManager(DirectObject):
             y -= 1
             keyboard_event = "md"
         
-        # If keyboard is not used, fallback to BrainLink
+        # If keyboard is not used, fallback to BrainLink (when keyboard is used and contradicts bl_event, we already prefer keyboard above)
         if not keyboard_event and bl_event:
             if bl_event == "ml":  # Move Left
                 x = -1
@@ -244,7 +260,7 @@ class InputManager(DirectObject):
             y /= length
         
         self.move_direction = (x, y)
-        self.action_pressed = self.keys["space"]
+        self.action_pressed = self.keys.get("action", False)
         
         # Track if BrainLink is being used for movement (only if keyboard is not used)
         self._is_using_brainlink = bool(not keyboard_event and bl_event and bl_event != "stop")
@@ -264,6 +280,10 @@ class InputManager(DirectObject):
             (x, y) normalized direction vector
         """
         return self.move_direction
+    
+    def rebind_keys(self):
+        """Re-read config and apply key bindings (call after user changed keys in settings)."""
+        self._apply_key_bindings()
     
     def is_action_pressed(self) -> bool:
         """Check if action key is pressed"""

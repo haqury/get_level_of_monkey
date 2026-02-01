@@ -23,14 +23,15 @@
     "send_to_ml": true,
     "send_brainlink_events": true,
     "confidence_threshold": 0.5,
+    "min_confidence": 0.25,
+    "full_confidence": 0.7,
     "prediction_weights": [
       1.0,
       1.0,
       1.0,
       1.0
     ],
-    "model_path": "C:/BLconfig/brainlink_classifier.pkl",
-    "stop_pauses_game": false
+    "model_path": "C:\\BLconfig\\111.pkl"
   },
   "controls": {
     "keyboard": {
@@ -38,7 +39,8 @@
       "down": "arrow_down",
       "left": "arrow_left",
       "right": "arrow_right",
-      "action": "space"
+      "action": "space",
+      "sit_pause": "p"
     }
   }
 }
