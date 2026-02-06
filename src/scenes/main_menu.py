@@ -152,6 +152,33 @@ class MainMenuScene(BaseScene):
         if font:
             self._apply_font_to_button(self.play_btn, font)
 
+        # Player name (click to edit)
+        player_name = (self.base.game_config.get("player", {}).get("name") or "Player") if hasattr(self.base, 'game_config') else "Player"
+        # Выбор игрока — на 1/6 экрана выше (z: -0.2 + 1/6*2 ≈ 0.13)
+        self.player_name_label = DirectLabel(
+            text="Player:",
+            text_scale=0.032,
+            text_fg=(0.9, 0.9, 0.9, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.45, 0, 0.13),
+            text_font=font,
+            text_align=TextNode.ALeft
+        )
+        self.player_name_btn = DirectButton(
+            text=(player_name[:20] if player_name else "Player"),
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.3, 0.35, 0.45, 1),
+            frameSize=(-0.22, 0.22, -0.06, 0.06),
+            pos=(0.05, 0, 0.13),
+            command=self._on_player_name_clicked,
+            text_font=font,
+            relief=2,
+            borderWidth=(0.008, 0.008)
+        )
+        if font:
+            self._apply_font_to_button(self.player_name_btn, font)
+
         # Settings button - touching Play button (Play bottom at -0.4, Config top at -0.4, center at -0.5)
         self.settings_btn = DirectButton(
             text="Config",
@@ -177,9 +204,23 @@ class MainMenuScene(BaseScene):
             command=self._on_quit_clicked,
             text_font=font
         )
-        # Apply font to all text components
         if font:
             self._apply_font_to_button(self.quit_btn, font)
+
+        # Back to game (shown only when opened settings from pause)
+        self.back_to_game_btn = DirectButton(
+            text="Back to game",
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.2, 0.5, 0.3, 1),
+            frameSize=(-0.28, 0.28, -0.1, 0.1),
+            pos=(0, 0, -0.3),
+            command=self._on_back_to_game_clicked,
+            text_font=font
+        )
+        if font:
+            self._apply_font_to_button(self.back_to_game_btn, font)
+        self.back_to_game_btn.hide()
         
         # Controls info - properly scaled, positioned just below Quit button
         self.controls_text = OnscreenText(
@@ -209,6 +250,11 @@ class MainMenuScene(BaseScene):
         self.subtitle.hide()
         self.status_frame.hide()
         self.play_btn.hide()
+        self.back_to_game_btn.hide()
+        if hasattr(self, 'player_name_label'):
+            self.player_name_label.hide()
+        if hasattr(self, 'player_name_btn'):
+            self.player_name_btn.hide()
         self.settings_btn.hide()
         self.quit_btn.hide()
         self.controls_text.hide()
@@ -224,11 +270,83 @@ class MainMenuScene(BaseScene):
         self.title.show()
         self.subtitle.show()
         self.status_frame.show()
-        self.play_btn.show()
+        self._update_from_pause_buttons()
+        if hasattr(self, 'player_name_label'):
+            self.player_name_label.show()
+        if hasattr(self, 'player_name_btn'):
+            self.player_name_btn.show()
         self.settings_btn.show()
         self.quit_btn.show()
         self.controls_text.show()
         # Settings frame stays hidden unless opened
+
+    def _update_from_pause_buttons(self):
+        """Show Play or Back to game depending on whether we came from pause."""
+        if getattr(self.base, "_from_pause_settings", False):
+            self.play_btn.hide()
+            self.back_to_game_btn.show()
+        else:
+            self.play_btn.show()
+            self.back_to_game_btn.hide()
+
+    def _on_back_to_game_clicked(self):
+        """Return to game without reset (called when opened settings from pause)."""
+        if hasattr(self.base, "_return_from_settings_to_game"):
+            self.base._return_from_settings_to_game()
+
+    def _on_player_name_clicked(self):
+        """Edit player name in-place: hide button, show DirectEntry."""
+        if getattr(self, "_player_name_edit", None):
+            return
+        current = (self.base.game_config.get("player", {}).get("name") or "Player") if hasattr(self.base, 'game_config') else "Player"
+        self.player_name_btn.hide()
+        font = getattr(self.base, 'cyrillic_font', None)
+        entry = DirectEntry(
+            scale=0.032,
+            initialText=str(current)[:30],
+            numLines=1,
+            width=18,
+            pos=(0.05, 0, 0.13),
+            text_font=font,
+            frameColor=(0.3, 0.35, 0.45, 1),
+            frameSize=(-0.22, 0.22, -0.06, 0.06),
+            relief=2,
+            borderWidth=(0.008, 0.008),
+            text_fg=(1, 1, 1, 1),
+            focus=1,
+            cursorKeys=1,
+            command=self._apply_player_name_edit,
+            focusOutCommand=self._apply_player_name_edit,
+        )
+        entry.setBin("fixed", 60)
+        self._player_name_edit = {"entry": entry, "btn": self.player_name_btn}
+        self.base.accept("escape", self._cancel_player_name_edit)
+
+    def _apply_player_name_edit(self, *args, **kwargs):
+        """Apply edited player name and show button again."""
+        edit = getattr(self, "_player_name_edit", None)
+        if not edit:
+            return
+        new_name = (edit["entry"].get() or "").strip()[:30] or "Player"
+        edit["entry"].destroy()
+        edit["btn"]["text"] = new_name[:20]
+        edit["btn"].show()
+        self._player_name_edit = None
+        self.base.ignore("escape")
+        if hasattr(self.base, 'game_config'):
+            self.base.game_config.setdefault("player", {})["name"] = new_name
+            self._save_game_config()
+        logger.info("Player name set: %s", new_name)
+
+    def _cancel_player_name_edit(self):
+        """Cancel player name edit (Escape)."""
+        edit = getattr(self, "_player_name_edit", None)
+        if not edit:
+            return
+        edit["entry"].destroy()
+        edit["btn"].show()
+        self._player_name_edit = None
+        self.base.ignore("escape")
     
     def enter(self, player=None):
         """Enter menu"""
@@ -1065,13 +1183,18 @@ class MainMenuScene(BaseScene):
             self.settings_frame.show()
             # Hide main menu buttons when settings are open to prevent overlap
             self.play_btn.hide()
+            self.back_to_game_btn.hide()
             self.settings_btn.hide()
             self.quit_btn.hide()
             self.controls_text.hide()
         else:
             self.settings_frame.hide()
-            # Show main menu buttons when settings are closed
-            self.play_btn.show()
+            # If we came from pause, return to game; else show main menu buttons
+            if getattr(self.base, "_from_pause_settings", False):
+                if hasattr(self.base, "_return_from_settings_to_game"):
+                    self.base._return_from_settings_to_game()
+                return
+            self._update_from_pause_buttons()
             self.settings_btn.show()
             self.quit_btn.show()
             self.controls_text.show()

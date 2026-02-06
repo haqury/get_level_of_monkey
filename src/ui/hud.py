@@ -183,7 +183,7 @@ class HUD:
         )
         
         self.ml_conf_label = DirectLabel(
-            text="conf: —",
+            text="pred: —  conf: —",
             text_scale=0.038,
             text_fg=(0.85, 0.85, 1.0, 1),
             text_align=TextNode.ALeft,
@@ -214,12 +214,13 @@ class HUD:
     
     def update_ml_display(self, prediction: str, connected: bool, confidence: float = 0.0, probs: dict = None):
         """Update ML stats (prediction, confidence, per-class probs, connection)."""
-        self.ml_pred_label["text"] = f"ML: {prediction}"
+        pred_str = prediction if prediction else "—"
+        self.ml_pred_label["text"] = f"ML: {pred_str}"
         if confidence > 0:
-            self.ml_conf_label["text"] = f"conf: {int(round(confidence * 100))}%"
+            self.ml_conf_label["text"] = f"pred: {pred_str}  conf: {int(round(confidence * 100))}%"
             self.ml_conf_label["text_fg"] = (0.3, 1.0, 0.5, 1) if confidence >= 0.5 else (1.0, 0.8, 0.2, 1)
         else:
-            self.ml_conf_label["text"] = "conf: —"
+            self.ml_conf_label["text"] = f"pred: {pred_str}  conf: —"
             self.ml_conf_label["text_fg"] = (0.7, 0.7, 0.8, 1)
         probs = probs or {}
         parts = []

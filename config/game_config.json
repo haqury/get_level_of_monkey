@@ -7,12 +7,13 @@
     "fps": 60
   },
   "player": {
+    "name": "haosit",
     "initial_hp": 3,
     "initial_energy": 100,
     "energy_regen_rate": 5.0,
     "move_cost": 100,
     "move_speed": 5,
-    "cheater_mode": true
+    "cheater_mode": false
   },
   "brainlink": {
     "enabled": true,

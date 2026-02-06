@@ -2,7 +2,8 @@
 
 import logging
 import random
-from panda3d.core import CardMaker, Vec3
+from panda3d.core import CardMaker, Vec3, TextNode
+from direct.gui.DirectGui import DirectFrame, DirectLabel
 from src.scenes.base_scene import BaseScene
 
 logger = logging.getLogger(__name__)
@@ -701,6 +702,11 @@ class MinigameScene(BaseScene):
         if hasattr(self.base, 'hud'):
             self.base.hud.show_survival_time()
         
+        # Top 10 игроков (без читеров) для этого режима — под статистикой времени
+        self.top10_frame = None
+        self.top10_labels = []
+        self._create_top10_display(monkey_mode)
+        
         logger.info(f"Minigame started! Mode: {monkey_mode}")
     
     def update(self, dt: float):
@@ -777,14 +783,68 @@ class MinigameScene(BaseScene):
                 self.poops.remove(poop)
                 poop.cleanup()
     
+    def _create_top10_display(self, mode: str):
+        """Create Top 10 panel справа, мелкий шрифт (non-cheater runs for this mode)."""
+        if not hasattr(self.base, 'save_system') or not self.base.save_system:
+            return
+        top10 = self.base.save_system.get_top10(mode)
+        font = getattr(self.base, 'cyrillic_font', None)
+        # Справа, под ML-блоком; мелкий шрифт
+        self.top10_frame = DirectFrame(
+            frameColor=(0.05, 0.05, 0.1, 0.75),
+            frameSize=(0, 0.32, 0, 0.2),
+            pos=(0.64, 0, 0.28),
+            borderWidth=(0.004, 0.004),
+        )
+        self.top10_frame.reparentTo(self.base.aspect2d)
+        self.top10_frame.setBin("fixed", 50)
+        DirectLabel(
+            text="Top 10",
+            text_scale=0.026,
+            text_fg=(1, 0.9, 0.3, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(0.01, 0, 0.18),
+            parent=self.top10_frame,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        for i, (name, t) in enumerate(top10):
+            lbl = DirectLabel(
+                text=f"{i + 1}. {name[:18]} — {t:.1f}s",
+                text_scale=0.02,
+                text_fg=(0.85, 0.85, 0.9, 1),
+                frameColor=(0, 0, 0, 0),
+                pos=(0.01, 0, 0.155 - i * 0.016),
+                parent=self.top10_frame,
+                text_font=font,
+                text_align=TextNode.ALeft,
+            )
+            self.top10_labels.append(lbl)
+        for i in range(len(top10), 10):
+            lbl = DirectLabel(
+                text="—",
+                text_scale=0.018,
+                text_fg=(0.5, 0.5, 0.55, 1),
+                frameColor=(0, 0, 0, 0),
+                pos=(0.01, 0, 0.155 - i * 0.016),
+                parent=self.top10_frame,
+                text_font=font,
+                text_align=TextNode.ALeft,
+            )
+            self.top10_labels.append(lbl)
+
     def _game_over(self):
         """Handle game over"""
         self.is_game_over = True
         logger.info(f"🎮 Game Over! Survived: {self.game_time:.1f}s")
         
-        # Save best time
+        # Save best time and stats (time + cheater + username)
         if hasattr(self.base, 'save_system'):
             self.base.save_system.save_minigame_time(self.game_time)
+            player_cfg = getattr(self.base, 'game_config', {}).get("player", {})
+            username = player_cfg.get("name", "Player")
+            cheater = player_cfg.get("cheater_mode", False)
+            self.base.save_system.save_minigame_run(self.game_time, cheater, username, getattr(self, "monkey_mode", "NorthSouth"))
         
         # Send event to BrainLink for ML training (game over)
         self._send_game_event("game_over")
@@ -817,25 +877,20 @@ class MinigameScene(BaseScene):
             if not bl_config.get("send_to_ml", False):
                 return
             
-            # Get current movement event from BrainLink
-            # This is the movement the player was thinking/doing when the game event occurred
-            current_event = brainlink.get_event()
+            # Send only keyboard-driven movement for ML — never BrainLink prediction (would create feedback loop)
+            current_event = self.base.input_manager.get_current_keyboard_event()
             
             if current_event and current_event in ["ml", "mr", "mu", "md"]:
-                # Send movement event for ML training
-                # The ML model will learn: "When player thought X, game event Y happened"
                 success = brainlink.send_event_for_ml_training(current_event)
                 if success:
                     logger.debug(f"📤 Sent '{event_name}' -> ML training: movement '{current_event}'")
                 else:
                     logger.debug(f"⚠️ Failed to send '{event_name}' for ML training")
             else:
-                # If no current movement event, check if player is using keyboard
-                # In that case, we can't send ML training data (no EEG data available)
-                if not self.base.input_manager.is_using_brainlink():
-                    logger.debug(f"⚠️ Cannot send '{event_name}' for ML: player using keyboard (no BrainLink)")
-                else:
-                    logger.debug(f"⚠️ Cannot send '{event_name}' for ML: no active movement event")
+                if self.base.input_manager.is_using_brainlink():
+                    logger.debug(f"⚠️ Cannot send '{event_name}' for ML: movement from BrainLink (prediction), not sending")
+                elif not current_event:
+                    logger.debug(f"⚠️ Cannot send '{event_name}' for ML: no keyboard movement event")
         
         except Exception as e:
             logger.warning(f"Error sending game event to BrainLink: {e}", exc_info=True)
@@ -847,6 +902,12 @@ class MinigameScene(BaseScene):
         # Hide survival time display
         if hasattr(self.base, 'hud'):
             self.base.hud.hide_survival_time()
+        
+        # Hide and destroy Top 10 panel
+        if getattr(self, 'top10_frame', None):
+            self.top10_frame.destroy()
+            self.top10_frame = None
+        self.top10_labels = []
         
         # Cleanup
         for monkey in self.monkeys:

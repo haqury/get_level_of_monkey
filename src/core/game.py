@@ -6,7 +6,11 @@ from pathlib import Path
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import loadPrcFileData, TextFont, Filename, WindowProperties
 
-from src.core.input_manager import InputManager
+from src.core.input_manager import (
+    InputManager,
+    MOVEMENT_SOURCE_KEYBOARD,
+    MOVEMENT_SOURCE_BRAINLINK,
+)
 from src.core.scene_manager import SceneManager
 from src.systems.energy_system import EnergySystem
 from src.systems.health_system import HealthSystem
@@ -150,7 +154,7 @@ class Game(ShowBase):
         """Get default configuration"""
         return {
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
-            "player": {"initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
+            "player": {"name": "Player", "initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
             "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "min_confidence": 0.25, "full_confidence": 0.7, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": ""},
             "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}}
         }
@@ -642,14 +646,31 @@ class Game(ShowBase):
         logger.info(f"Game loaded, scene: {scene_id}")
     
     def _on_pause_settings(self):
-        """Open settings (main menu with settings panel)."""
+        """Open settings (main menu with settings panel). Scene kept in memory so returning does not reset game."""
         self.pause_menu.hide()
         self.in_game = False
         self.hud.hide()
-        self.scene_manager.switch_to("main_menu", self.player)
+        return_scene_id = self.scene_manager.get_current_scene_name()
+        self._return_scene_id = return_scene_id
+        self._from_pause_settings = True
+        self.scene_manager.switch_to("main_menu", self.player, keep_previous=True)
         menu = self.scene_manager.get_current_scene()
         if menu and hasattr(menu, "_on_settings_clicked"):
             menu._on_settings_clicked()
+        if menu and hasattr(menu, "_update_from_pause_buttons"):
+            menu._update_from_pause_buttons()
+
+    def _return_from_settings_to_game(self):
+        """Return to game from settings (without resetting)."""
+        if not getattr(self, "_return_scene_id", None):
+            return
+        self._from_pause_settings = False
+        scene_id = self._return_scene_id
+        self._return_scene_id = None
+        self.in_game = True
+        self.hud.show()
+        self.scene_manager.switch_to(scene_id, self.player)
+        logger.info("Returned to game from settings: %s", scene_id)
     
     def _on_pause_exit(self):
         """Exit to main menu / quit game."""
@@ -680,6 +701,14 @@ class Game(ShowBase):
         # Update input
         self.input_manager.update(dt)
         
+        # При диалоге или паузе — сбросить весь ввод, чтобы движение не «залипало»
+        if self.dialog_box.is_visible or self.pause_menu.is_visible:
+            if not getattr(self, "_input_cleared_for_modal", False):
+                self._input_cleared_for_modal = True
+                self.input_manager.clear_state()
+        else:
+            self._input_cleared_for_modal = False
+        
         # Sitting: hold Space = sit, 2x energy regen, send "stop" to BrainLink
         sitting = self.in_game and not self.dialog_box.is_visible and self.input_manager.is_action_pressed()
         self.player.is_sitting = sitting
@@ -691,16 +720,21 @@ class Game(ShowBase):
         regen_mult = 2.0 if sitting else 1.0
         self.energy_system.update(dt, regen_multiplier=regen_mult)
         
-        # While sitting, send "stop" to BrainLink for recording (throttled)
+        # While sitting (Space held), send "stop" to BrainLink — one command per throttle (Type 2 = ML+history, else Type 1 = history)
         if sitting and self.input_manager.brainlink and self.input_manager.brainlink.is_connected():
-            if getattr(self.input_manager, 'send_brainlink_events', True) or getattr(self.input_manager, 'send_to_history', True):
+            send_events = getattr(self.input_manager, 'send_brainlink_events', True) or getattr(self.input_manager, 'send_to_history', True) or getattr(self.input_manager, 'send_to_ml', False)
+            if send_events:
                 import time
                 now = time.time()
                 if not hasattr(self, '_last_stop_sent_time'):
                     self._last_stop_sent_time = 0.0
                 if now - self._last_stop_sent_time >= 0.5:
-                    if self.input_manager.brainlink.send_event_to_history("stop"):
-                        self._last_stop_sent_time = now
+                    if getattr(self.input_manager, 'send_to_ml', False):
+                        if self.input_manager.brainlink.send_event_for_ml_training("stop"):
+                            self._last_stop_sent_time = now
+                    elif getattr(self.input_manager, 'send_to_history', True):
+                        if self.input_manager.brainlink.send_event_to_history("stop"):
+                            self._last_stop_sent_time = now
         
         # When pause menu is open: freeze game, don't update scene or movement
         if self.pause_menu.is_visible:
@@ -725,7 +759,8 @@ class Game(ShowBase):
                 self._movement_debug_counter = 0
             self._movement_debug_counter += 1
             
-            is_brainlink = self.input_manager.is_using_brainlink()
+            movement_source = self.input_manager.get_movement_source()
+            is_brainlink = movement_source == MOVEMENT_SOURCE_BRAINLINK
             # BrainLink speed scale by confidence: below min = no move, min..full = limited speed, >= full = max speed
             brainlink_speed_mult = 1.0
             if is_brainlink and move_dir != (0, 0):
@@ -741,14 +776,16 @@ class Game(ShowBase):
                 else:
                     brainlink_speed_mult = (conf - min_c) / (full_c - min_c) if full_c > min_c else 1.0
                 if move_dir != (0, 0) and self._movement_debug_counter % 60 == 0:
-                    logger.info(f"🎮 Game: BrainLink movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), conf={conf:.2f}, speed_mult={brainlink_speed_mult:.2f}")
+                    logger.info(f"🎮 Game: [BrainLink] movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), conf={conf:.2f}, speed_mult={brainlink_speed_mult:.2f}")
             
             if move_dir != (0, 0):
                 # Get current scene for movement restrictions
                 current_scene = self.scene_manager.get_current_scene()
                 
-                # Only spend energy if using keyboard (not BrainLink)
-                should_spend_energy = not self.input_manager.is_using_brainlink()
+                # Only spend energy when movement is from keyboard (not BrainLink)
+                should_spend_energy = movement_source == MOVEMENT_SOURCE_KEYBOARD
+                if self._movement_debug_counter % 60 == 0 and movement_source == MOVEMENT_SOURCE_KEYBOARD:
+                    logger.info(f"🎮 Game: [Keyboard] movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f})")
                 
                 if should_spend_energy:
                     # Try to spend energy (only for keyboard movement)
@@ -764,7 +801,7 @@ class Game(ShowBase):
                     if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
                         bounds = current_scene.MOVEMENT_BOUNDS
                     if self._movement_debug_counter % 60 == 0:
-                        logger.info(f"🎮 Game: BrainLink movement - speed={effective_speed:.2f} (mult={brainlink_speed_mult:.2f})")
+                        logger.info(f"🎮 Game: [BrainLink] movement - speed={effective_speed:.2f} (mult={brainlink_speed_mult:.2f})")
                     self.player.move(move_dir[0], move_dir[1], dt, effective_speed, bounds, current_scene)
             
             # Check for automatic scene transitions (exits work automatically)
@@ -876,30 +913,32 @@ class Game(ShowBase):
         return task.done
     
     def _show_minigame_position_dialog(self):
-        """Show dialog to select starting position for minigame"""
-        # Ensure previous dialog is closed
+        """Show dialog to select starting position for minigame; show leader name and time (non-cheater) per mode."""
         if self.dialog_box.is_visible:
-            logger.warning("Dialog already visible, hiding it first")
             self.dialog_box.hide()
         
-        # Create a dummy NPC for the dialog box
         class SystemNPC:
             name = "System"
-        
         system_npc = SystemNPC()
+        
+        # Лидеры по режимам (без читеров)
+        leader_text = ""
+        if hasattr(self, 'save_system') and self.save_system:
+            ns_name, ns_time = self.save_system.get_leader("NorthSouth")
+            we_name, we_time = self.save_system.get_leader("WestEast")
+            leader_text = f"\n\nLeader (North-South): {ns_name} — {ns_time:.1f}s\nLeader (West-East): {we_name} — {we_time:.1f}s"
         
         dialog = {
             "title": "Minigame Mode Selection",
-            "text": "Choose minigame mode (determines where monkeys walk from):",
+            "text": "Choose minigame mode (determines where monkeys walk from):" + leader_text,
             "options": [
                 ("North-South (monkeys walk along top and bottom edges)", lambda: self._start_minigame_with_position("NorthSouth")),
                 ("West-East (monkeys walk along left and right edges)", lambda: self._start_minigame_with_position("WestEast"))
             ]
         }
         
-        logger.info(f"Attempting to show minigame mode selection dialog with {len(dialog['options'])} options")
+        logger.info("Showing minigame mode selection dialog with leaders")
         self.dialog_box.show(system_npc, dialog)
-        logger.info("Minigame mode selection dialog should be visible now with 2 options: NorthSouth, WestEast")
     
     def _start_minigame_with_position(self, monkey_mode: str):
         """Start minigame with selected mode

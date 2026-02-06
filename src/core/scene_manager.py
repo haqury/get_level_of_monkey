@@ -54,8 +54,13 @@ class SceneManager:
         Args:
             scene_id: Target scene ID
             player: Player object
-            *args, **kwargs: Additional arguments passed to scene factory and scene.enter()
+            *args, **kwargs: Additional arguments passed to scene factory and scene.enter().
+                keep_previous: if True, do not unload the current scene (e.g. for settings from pause).
         """
+        keep_previous = kwargs.pop("keep_previous", False)
+        # Сбросить ввод при смене сцены, чтобы движение не переносилось
+        if hasattr(self.base, 'input_manager') and self.base.input_manager:
+            self.base.input_manager.clear_state()
         # Auto-save before switching scenes
         if hasattr(self.base, 'save_system') and self.current_scene:
             self._auto_save()
@@ -63,8 +68,8 @@ class SceneManager:
         # Exit current scene
         if self.current_scene:
             self.current_scene.exit()
-            # Unload previous scene to free memory (except main_menu which stays loaded)
-            if self.current_scene_id != "main_menu" and self.current_scene_id in self.loaded_scenes:
+            # Unload previous scene to free memory (except main_menu; skip if keep_previous)
+            if not keep_previous and self.current_scene_id != "main_menu" and self.current_scene_id in self.loaded_scenes:
                 self.current_scene.cleanup()
                 del self.loaded_scenes[self.current_scene_id]
                 logger.info(f"Unloaded scene: {self.current_scene_id}")
@@ -87,6 +92,8 @@ class SceneManager:
         self.current_scene = scene
         self.current_scene_id = scene_id
         self.current_scene.enter(player, *args, **kwargs)
+        if keep_previous:
+            logger.info(f"Switched to {scene_id} (previous scene kept in memory)")
         
         # Force multiple render updates to ensure scene is visible (fixes gray screen issue)
         try:
