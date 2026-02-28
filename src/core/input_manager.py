@@ -40,6 +40,7 @@ class InputManager(DirectObject):
         self._is_using_brainlink = False
         self._current_ml_event = ""
         self.last_keyboard_event = ""
+        self._last_sent_event = ""  # последнее отправленное в BrainLink (ml/mr/mu/md/ne)
 
         self.send_keyboard_events = False
         self.send_brainlink_events = False
@@ -102,22 +103,9 @@ class InputManager(DirectObject):
             self._current_keyboard_event = ""
             self._is_using_brainlink = False
 
-        # Отправка в BrainLink только при действии с клавиатуры (не предсказание)
-        if (
-            self.send_keyboard_events
-            and kb_event
-            and kb_event != self.last_keyboard_event
-            and not movement_from_brainlink_this_frame
-            and self.brainlink
-        ):
-            if self.send_to_ml:
-                if self.brainlink_input.send_event_for_ml_training(kb_event):
-                    logger.debug("📤 [Keyboard] sent '%s' for ML (and history)", kb_event)
-            elif self.send_to_history:
-                if self.brainlink_input.send_event_to_history(kb_event):
-                    logger.debug("📤 [Keyboard] sent '%s' to history", kb_event)
+        if kb_event:
             self.last_keyboard_event = kb_event
-        if not kb_event:
+        else:
             self.last_keyboard_event = ""
 
         # Нормализация диагонали
@@ -129,11 +117,37 @@ class InputManager(DirectObject):
         self.move_direction = (x, y)
         self.action_pressed = self.keyboard.is_action_pressed()
 
+        # Отправка в BrainLink текущего эффективного действия (клавиатура или BrainLink); при остановке — "ne"
+        if self.brainlink and self.brainlink.is_connected() and (self.send_to_history or self.send_to_ml):
+            if x < 0 and y == 0:
+                effective_event = "ml"
+            elif x > 0 and y == 0:
+                effective_event = "mr"
+            elif y > 0 and x == 0:
+                effective_event = "mu"
+            elif y < 0 and x == 0:
+                effective_event = "md"
+            else:
+                effective_event = "ne"
+            allow_send = (
+                effective_event == "ne"
+                or (self._movement_source == MOVEMENT_SOURCE_KEYBOARD and self.send_keyboard_events)
+                or (self._movement_source == MOVEMENT_SOURCE_BRAINLINK and self.send_brainlink_events)
+            )
+            if allow_send and effective_event != self._last_sent_event:
+                self._last_sent_event = effective_event
+                if self.send_to_ml:
+                    self.brainlink_input.send_event_for_ml_training(effective_event)
+                elif self.send_to_history:
+                    self.brainlink_input.send_event_to_history(effective_event)
+                logger.debug("📤 Sent effective event '%s' to BrainLink", effective_event)
+
     def clear_state(self):
         """Сброс ввода (диалог/смена сцены). В BrainLink «stop» не отправляется — только при явном «сидеть» (Space)."""
         self.keyboard.clear_state()
         self.brainlink_input.clear_state()
         self.last_keyboard_event = ""
+        self._last_sent_event = ""
         self.move_direction = (0.0, 0.0)
         self.action_pressed = False
         self._current_movement_event = ""
