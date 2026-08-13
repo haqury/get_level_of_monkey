@@ -4,7 +4,7 @@ import json
 import logging
 from pathlib import Path
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import loadPrcFileData, TextFont, Filename, WindowProperties
+from panda3d.core import loadPrcFileData, TextFont, Filename, WindowProperties, OrthographicLens
 
 from src.core.input_manager import (
     InputManager,
@@ -25,6 +25,7 @@ from src.ui.dialog_box import DialogBox
 from src.ui.pause_menu import PauseMenu
 from src.services.brainlink_launcher import BrainLinkLauncher
 from src.services.save_system import SaveSystem
+from src.core.i18n import load_locale, t, resolve_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class Game(ShowBase):
         # Load config (renamed to avoid conflict with ShowBase.config)
         self.game_config = self._load_config()
         self.balance = self._load_balance()
+        load_locale(self.game_config.get("locale", "en"))
         
         # Configure Panda3D
         self._configure_panda3d()
@@ -156,7 +158,8 @@ class Game(ShowBase):
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
             "player": {"name": "Player", "initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
             "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "min_confidence": 0.25, "full_confidence": 0.7, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": ""},
-            "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}}
+            "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}},
+            "locale": "en",
         }
     
     def _configure_panda3d(self):
@@ -187,144 +190,174 @@ class Game(ShowBase):
         except:
             pass  # HarfBuzz may not be available
 
-    # === Runtime window configuration ===
-    def apply_resolution(self, width: int, height: int, fullscreen: bool) -> None:
-        """
-        Apply new resolution/fullscreen settings at runtime and persist to config.
+    # === Window / display ===
+    def _get_native_display_size(self) -> tuple[int, int]:
+        """Native monitor resolution (for fullscreen without OS scaling)."""
+        try:
+            if self.pipe:
+                w = int(self.pipe.getDisplayWidth())
+                h = int(self.pipe.getDisplayHeight())
+                if w > 0 and h > 0:
+                    return w, h
+        except Exception as e:
+            logger.warning("Could not query native display size: %s", e)
+        cfg = self.game_config.get("window", {})
+        return int(cfg.get("width", 1920)), int(cfg.get("height", 1080))
 
-        Args:
-            width: Window width in pixels
-            height: Window height in pixels
-            fullscreen: True for fullscreen, False for windowed
-        """
-        logger.info(f"Applying resolution: {width}x{height}, fullscreen={fullscreen}")
+    def _get_window_pixel_size(self) -> tuple[int, int]:
+        """Current framebuffer size in pixels."""
+        try:
+            props = self.win.getProperties()
+            w = int(props.getXSize())
+            h = int(props.getYSize())
+            if w > 0 and h > 0:
+                return w, h
+        except Exception:
+            pass
+        cfg = self.game_config.get("window", {})
+        return int(cfg.get("width", 1920)), int(cfg.get("height", 1080))
 
-        # Update in-memory config
+    def _resolve_window_size(self, width: int, height: int, fullscreen: bool) -> tuple[int, int]:
+        """Pick final window size; fullscreen uses native monitor resolution."""
+        if fullscreen:
+            return self._get_native_display_size()
+        return int(width), int(height)
+
+    def _schedule_camera_aspect_update(self) -> None:
+        """Update camera after window size has settled."""
+        self.taskMgr.remove("update_camera_aspect")
+        self.taskMgr.doMethodLater(0.1, self._delayed_camera_setup, "update_camera_aspect")
+
+    def _on_window_event(self, window) -> None:
+        """Keep camera aspect in sync when the OS window is resized."""
+        if window is not self.win:
+            return
+        self._schedule_camera_aspect_update()
+
+    def _apply_window_properties(self, width: int, height: int, fullscreen: bool) -> tuple[int, int]:
+        """Apply size/fullscreen to the OS window. Returns actual requested size."""
+        resolved_w, resolved_h = self._resolve_window_size(width, height, fullscreen)
+        props = WindowProperties()
+        props.setSize(resolved_w, resolved_h)
+        props.setFullscreen(bool(fullscreen))
+        self.win.requestProperties(props)
+        logger.info(
+            "Window properties requested: %sx%s, fullscreen=%s (config was %sx%s)",
+            resolved_w, resolved_h, fullscreen, width, height,
+        )
+        return resolved_w, resolved_h
+
+    def _sync_window_config(self, width: int, height: int, fullscreen: bool) -> None:
+        """Persist effective window settings to memory and disk."""
         window_cfg = self.game_config.get("window", {})
         window_cfg["width"] = int(width)
         window_cfg["height"] = int(height)
         window_cfg["fullscreen"] = bool(fullscreen)
         self.game_config["window"] = window_cfg
-
-        # Save to JSON config so it persists between runs
         try:
             config_path = Path("config/game_config.json")
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self.game_config, f, indent=2)
-            logger.info(f"Saved window config to {config_path}")
+            logger.info("Saved window config: %sx%s fullscreen=%s", width, height, fullscreen)
         except Exception as e:
-            logger.warning(f"Failed to save window config: {e}")
+            logger.warning("Failed to save window config: %s", e)
 
-        # Apply to current Panda3D window
+    def apply_resolution(self, width: int, height: int, fullscreen: bool) -> None:
+        """
+        Apply new resolution/fullscreen settings at runtime and persist to config.
+
+        In fullscreen mode the native monitor resolution is used to avoid stretching.
+        """
+        logger.info("Applying resolution: %sx%s, fullscreen=%s", width, height, fullscreen)
         try:
-            props = WindowProperties()
-            props.setSize(int(width), int(height))
-            props.setFullscreen(bool(fullscreen))
-            self.win.requestProperties(props)
-            logger.info("Window properties updated")
-            
-            # Update camera lens to match new aspect ratio
-            self._update_camera_aspect_ratio()
+            applied_w, applied_h = self._apply_window_properties(width, height, fullscreen)
+            self._sync_window_config(applied_w, applied_h, fullscreen)
+            self._schedule_camera_aspect_update()
         except Exception as e:
-            logger.error(f"Failed to apply window properties: {e}")
+            logger.error("Failed to apply window properties: %s", e)
+
+    def get_window_display_info(self) -> str:
+        """Human-readable current window mode for settings UI."""
+        w, h = self._get_window_pixel_size()
+        fullscreen = False
+        try:
+            fullscreen = bool(self.win.getProperties().getFullscreen())
+        except Exception:
+            fullscreen = bool(self.game_config.get("window", {}).get("fullscreen", False))
+        mode = t("settings.fullscreen_mode") if fullscreen else t("settings.windowed_mode")
+        return t("settings.display_format", w=w, h=h, mode=mode)
+    
+    def set_locale(self, locale: str) -> None:
+        """Switch UI language and persist to config."""
+        from src.core.i18n import SUPPORTED_LOCALES
+        if locale not in SUPPORTED_LOCALES:
+            return
+        self.game_config["locale"] = locale
+        load_locale(locale)
+        try:
+            config_path = Path("config/game_config.json")
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config = {}
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            config["locale"] = locale
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save locale: %s", e)
+        self.refresh_ui_locale()
+    
+    def refresh_ui_locale(self) -> None:
+        """Refresh all visible UI strings after language change."""
+        menu = self.scene_manager.loaded_scenes.get("main_menu")
+        if menu and hasattr(menu, "refresh_locale"):
+            menu.refresh_locale()
+        if self.pause_menu and hasattr(self.pause_menu, "refresh_locale"):
+            self.pause_menu.refresh_locale()
+        if self.hud and hasattr(self.hud, "refresh_locale"):
+            self.hud.refresh_locale()
+        if self.dialog_box and hasattr(self.dialog_box, "refresh_locale"):
+            self.dialog_box.refresh_locale()
+        for scene in self.scene_manager.loaded_scenes.values():
+            for npc in getattr(scene, "npcs", []):
+                if hasattr(npc, "refresh_locale"):
+                    npc.refresh_locale()
+            if hasattr(scene, "refresh_locale"):
+                scene.refresh_locale()
     
     def _setup_font(self):
-        """Setup font with Cyrillic support"""
-        import os
-        from panda3d.core import TextNode, DynamicTextFont
-        
-        self.cyrillic_font = None
-        
-        # Try to load system font with Cyrillic support
-        # Common Windows fonts: Arial, Times New Roman, Segoe UI
-        font_paths = [
-            "C:/Windows/Fonts/arial.ttf",
-            "C:/Windows/Fonts/times.ttf",
-            "C:/Windows/Fonts/segoeui.ttf",
-        ]
-        
-        for font_path in font_paths:
-            if os.path.exists(font_path):
-                try:
-                    logger.info(f"Attempting to load font: {font_path}")
-                    
-                    # Method 1: Try DynamicTextFont.load() - this is the recommended way
-                    try:
-                        font = DynamicTextFont()
-                        font_file = Filename.fromOsSpecific(font_path)
-                        
-                        # Load font - this should work if FreeType is available
-                        if font.load(font_file):
-                            self.cyrillic_font = font
-                            logger.info(f"✓ Successfully loaded font using DynamicTextFont: {font_path}")
-                            break
-                        else:
-                            logger.warning(f"Font.load() returned False for {font_path}")
-                    except Exception as e:
-                        logger.warning(f"DynamicTextFont.load() failed: {e}")
-                    
-                    # Method 2: Try loader.loadFont() - alternative method
-                    try:
-                        # Try with raw string path
-                        font = self.loader.loadFont(font_path)
-                        if font:
-                            self.cyrillic_font = font
-                            logger.info(f"✓ Successfully loaded font via loader.loadFont: {font_path}")
-                            break
-                    except Exception as e:
-                        logger.warning(f"loader.loadFont() failed: {e}")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to load font {font_path}: {e}")
-                    continue
-        
-        if not self.cyrillic_font:
-            logger.warning("✗ Could not load Cyrillic font, text may not display correctly")
-            # Try to get default font and use it
-            try:
-                default_font = TextNode.getDefaultFont()
-                if default_font:
-                    self.cyrillic_font = default_font
-                    logger.info("Using default font")
-            except:
-                pass
-        else:
-            # Set as default font for all TextNodes
-            try:
-                TextNode.setDefaultFont(self.cyrillic_font)
-                logger.info("✓ Set Cyrillic font as default for all TextNodes")
-            except Exception as e:
-                logger.warning(f"Could not set default font: {e}")
+        """Setup font with Cyrillic support."""
+        from src.core.font_setup import apply_ui_font, load_cyrillic_font
+
+        self.cyrillic_font = load_cyrillic_font()
+        apply_ui_font(self.cyrillic_font)
     
     def _setup_window(self):
         """Setup game window"""
         self.disableMouse()
-        
-        # Ensure window has correct size (fix for resolution issues)
+        self.accept("window-event", self._on_window_event)
+
         cfg = self.game_config["window"]
-        width = cfg.get('width', 1920)
-        height = cfg.get('height', 1080)
-        
-        # Set window properties explicitly after window is created
+        width = cfg.get("width", 1920)
+        height = cfg.get("height", 1080)
+        fullscreen = bool(cfg.get("fullscreen", False))
+
         try:
-            props = WindowProperties()
-            props.setSize(int(width), int(height))
-            if cfg.get('fullscreen', False):
-                props.setFullscreen(True)
-            else:
-                props.setFullscreen(False)
-            self.win.requestProperties(props)
-            logger.info(f"Window properties set: {width}x{height}, fullscreen={cfg.get('fullscreen', False)}")
+            applied_w, applied_h = self._apply_window_properties(width, height, fullscreen)
+            if applied_w != width or applied_h != height or fullscreen:
+                self._sync_window_config(applied_w, applied_h, fullscreen)
+            logger.info(
+                "Window initialized: %sx%s fullscreen=%s (native=%sx%s)",
+                applied_w, applied_h, fullscreen,
+                *self._get_native_display_size(),
+            )
         except Exception as e:
-            logger.warning(f"Failed to apply initial window properties: {e}")
-        
-        # Wait a frame for window to update, then setup camera
-        # Use a task to update camera after window is ready
-        self.taskMgr.doMethodLater(0.1, self._delayed_camera_setup, "delayed_camera_setup")
-        
-        # Position camera to look at the scene
-        # Use self.cam (default camera) instead of self.camera
+            logger.warning("Failed to apply initial window properties: %s", e)
+
+        self._schedule_camera_aspect_update()
+
         self.cam.setPos(0, -120, 0)
         self.cam.lookAt(0, 0, 0)
     
@@ -335,40 +368,27 @@ class Game(ShowBase):
     
     def _update_camera_aspect_ratio(self):
         """Update camera lens to match current window aspect ratio"""
-        # Get window aspect ratio
-        try:
-            window_width = self.win.getProperties().getXSize()
-            window_height = self.win.getProperties().getYSize()
-        except:
-            window_width = 0
-            window_height = 0
-        
-        if window_width == 0 or window_height == 0:
-            # Fallback to config values
-            window_width = self.game_config["window"]["width"]
-            window_height = self.game_config["window"]["height"]
-        
-        aspect_ratio = window_width / window_height if window_height > 0 else 16/9
-        
-        # Setup orthographic lens with correct aspect ratio
-        from panda3d.core import OrthographicLens
-        lens = OrthographicLens()
-        # Set view bounds to match aspect ratio
-        # For 16:9 (1920x1080), we want to see about 70 units wide
+        window_width, window_height = self._get_window_pixel_size()
+        aspect_ratio = window_width / window_height if window_height > 0 else 16 / 9
+
+        if not hasattr(self, "_ortho_lens") or self._ortho_lens is None:
+            self._ortho_lens = OrthographicLens()
+
         view_width = 70.0
         view_height = view_width / aspect_ratio
-        lens.setFilmSize(view_width, view_height)
-        lens.setNearFar(-1000, 1000)
-        
-        # Use self.cam (NodePath) to access the Camera node
-        # In Panda3D, self.cam is the default camera NodePath
+        self._ortho_lens.setFilmSize(view_width, view_height)
+        self._ortho_lens.setNearFar(-1000, 1000)
+
         cam_node = self.cam.node()
         if cam_node:
-            cam_node.setLens(lens)
+            cam_node.setLens(self._ortho_lens)
         else:
             logger.warning("Could not access camera node, using default lens")
-        
-        logger.info(f"Camera lens updated: aspect={aspect_ratio:.2f}, view={view_width:.1f}x{view_height:.1f}, window={window_width}x{window_height}")
+
+        logger.info(
+            "Camera lens updated: aspect=%.2f, view=%.1fx%.1f, window=%sx%s",
+            aspect_ratio, view_width, view_height, window_width, window_height,
+        )
     
     
     def _setup_scenes(self):
@@ -397,8 +417,8 @@ class Game(ShowBase):
         # Check if Shared Memory is already available
         if self.brainlink_launcher.is_shared_memory_running():
             menu.update_brainlink_status(
-                "Connected",
-                "BrainLink is ready!",
+                t("brainlink_status.connected"),
+                t("brainlink_status.ready"),
                 (0.2, 1.0, 0.2, 1)
             )
             menu.enable_play_button()
@@ -412,8 +432,8 @@ class Game(ShowBase):
             # Process is running, but Shared Memory is not enabled
             logger.info("⚠️ BrainLinkClient is running, but Shared Memory is not enabled")
             menu.update_brainlink_status(
-                "Restarting...",
-                "Enabling Shared Memory...",
+                t("brainlink_status.restarting"),
+                t("brainlink_status.enabling_shared_memory"),
                 (1, 1, 0, 1)
             )
             
@@ -421,15 +441,15 @@ class Game(ShowBase):
             if self.brainlink_launcher.restart_with_shared_memory():
                 # Wait for Shared Memory to become available
                 menu.update_brainlink_status(
-                    "Connecting...",
-                    "Waiting for Shared Memory...",
+                    t("brainlink_status.connecting"),
+                    t("brainlink_status.waiting_shared_memory"),
                     (1, 1, 0, 1)
                 )
                 self.taskMgr.doMethodLater(3.0, self._verify_connection, "verify_connection")
             else:
                 menu.update_brainlink_status(
-                    "Restart Failed",
-                    "Could not restart BrainLinkClient. Enable Shared Memory manually.",
+                    t("brainlink_status.restart_failed"),
+                    t("brainlink_status.restart_failed_info"),
                     (1, 0.5, 0, 1)
                 )
                 menu.enable_play_button()  # Allow playing without BrainLink
@@ -437,8 +457,8 @@ class Game(ShowBase):
         
         # BrainLinkClient not running, try to find and launch
         menu.update_brainlink_status(
-            "Searching...",
-            "Looking for BrainLinkClient...",
+            t("brainlink_status.searching"),
+            t("brainlink_status.looking_for_client"),
             (1, 1, 0, 1)
         )
         
@@ -457,16 +477,16 @@ class Game(ShowBase):
         if path:
             # Found! Try to launch
             menu.update_brainlink_status(
-                "Launching...",
-                f"Starting BrainLinkClient...",
+                t("brainlink_status.launching"),
+                t("brainlink_status.starting_client"),
                 (1, 1, 0, 1)
             )
             
             if self.brainlink_launcher.launch():
                 # Wait for connection
                 menu.update_brainlink_status(
-                    "Connecting...",
-                    "Waiting for Shared Memory...",
+                    t("brainlink_status.connecting"),
+                    t("brainlink_status.waiting_shared_memory"),
                     (1, 1, 0, 1)
                 )
                 
@@ -474,16 +494,16 @@ class Game(ShowBase):
                 self.taskMgr.doMethodLater(3.0, self._verify_connection, "verify_connection")
             else:
                 menu.update_brainlink_status(
-                    "Launch Failed",
-                    "Could not start BrainLinkClient",
+                    t("brainlink_status.launch_failed"),
+                    t("brainlink_status.could_not_start"),
                     (1, 0.2, 0.2, 1)
                 )
                 menu.enable_play_button()  # Allow playing without BrainLink
         else:
             # Not found
             menu.update_brainlink_status(
-                "Not Found",
-                "BrainLinkClient not found. Playing without BrainLink.",
+                t("brainlink_status.not_found"),
+                t("brainlink_status.not_found_info"),
                 (1, 0.5, 0, 1)
             )
             menu.enable_play_button()  # Allow playing without BrainLink
@@ -498,16 +518,16 @@ class Game(ShowBase):
         
         if self.brainlink_launcher.wait_for_connection(timeout=8.0):
             menu.update_brainlink_status(
-                "Connected",
-                "BrainLink is ready! You can control with your mind!",
+                t("brainlink_status.connected"),
+                t("brainlink_status.ready_mind"),
                 (0.2, 1.0, 0.2, 1)
             )
             menu.enable_play_button()
             logger.info("✅ BrainLink connected successfully")
         else:
             menu.update_brainlink_status(
-                "Timeout",
-                "BrainLink started but not connected. Playing without BrainLink.",
+                t("brainlink_status.started_not_connected"),
+                t("brainlink_status.started_not_connected_info"),
                 (1, 0.5, 0, 1)
             )
             menu.enable_play_button()
@@ -829,11 +849,9 @@ class Game(ShowBase):
                                     # Only show dialog if it's not already shown
                                     if not self._exit_dialog_shown:
                                         # Use father's exit_dialog, but update callback
-                                        exit_dialog = father.exit_dialog.copy()  # Make a copy
-                                        # Set the callback for the "Play Minigame" option
-                                        # Use a proper callback that doesn't capture loop variables
+                                        exit_dialog = resolve_dialog(father.exit_dialog)
                                         exit_dialog["options"] = [
-                                            ("Play Minigame", self._on_father_agrees_to_minigame)
+                                            (t("npc.father.play_minigame"), self._on_father_agrees_to_minigame)
                                         ]
                                         self.dialog_box.show(father, exit_dialog)
                                         self._exit_dialog_shown = True  # Mark that dialog was shown
@@ -918,23 +936,25 @@ class Game(ShowBase):
             self.dialog_box.hide()
         
         class SystemNPC:
-            name = "System"
+            name = t("minigame.system")
         system_npc = SystemNPC()
         
-        # Лидеры по режимам (без читеров)
         leader_text = ""
         if hasattr(self, 'save_system') and self.save_system:
             ns_name, ns_time = self.save_system.get_leader("NorthSouth")
             we_name, we_time = self.save_system.get_leader("WestEast")
-            leader_text = f"\n\nLeader (North-South): {ns_name} — {ns_time:.1f}s\nLeader (West-East): {we_name} — {we_time:.1f}s"
+            leader_text = (
+                f"\n\n{t('minigame.leader_ns', name=ns_name, time=ns_time)}"
+                f"\n{t('minigame.leader_we', name=we_name, time=we_time)}"
+            )
         
         dialog = {
-            "title": "Minigame Mode Selection",
-            "text": "Choose minigame mode (determines where monkeys walk from):" + leader_text,
+            "title_key": "minigame.mode_title",
+            "text": t("minigame.mode_text") + leader_text,
             "options": [
-                ("North-South (monkeys walk along top and bottom edges)", lambda: self._start_minigame_with_position("NorthSouth")),
-                ("West-East (monkeys walk along left and right edges)", lambda: self._start_minigame_with_position("WestEast"))
-            ]
+                (t("minigame.mode_ns"), lambda: self._start_minigame_with_position("NorthSouth")),
+                (t("minigame.mode_we"), lambda: self._start_minigame_with_position("WestEast")),
+            ],
         }
         
         logger.info("Showing minigame mode selection dialog with leaders")

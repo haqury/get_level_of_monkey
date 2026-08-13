@@ -1,0 +1,119 @@
+{
+  "menu": {
+    "title": "Get Level of Monkey",
+    "subtitle": "2D экшен с интеграцией BrainLink",
+    "play": "Играть",
+    "config": "Настройки",
+    "quit": "Выход",
+    "back_to_game": "Вернуться в игру",
+    "player": "Игрок",
+    "controls_hint": "Управление: стрелки или BrainLink (ml/mr/mu/md)",
+    "default_player_name": "Игрок"
+  },
+  "brainlink_status": {
+    "label": "Статус BrainLink:",
+    "checking": "Проверка...",
+    "searching_info": "Поиск BrainLinkClient...",
+    "connected": "Подключено",
+    "ready": "BrainLink готов!",
+    "ready_mind": "BrainLink готов! Управляйте силой мысли!",
+    "restarting": "Перезапуск...",
+    "enabling_shared_memory": "Включение Shared Memory...",
+    "connecting": "Подключение...",
+    "waiting_shared_memory": "Ожидание Shared Memory...",
+    "restart_failed": "Ошибка перезапуска",
+    "restart_failed_info": "Не удалось перезапустить BrainLinkClient. Включите Shared Memory вручную.",
+    "searching": "Поиск...",
+    "looking_for_client": "Поиск BrainLinkClient...",
+    "launching": "Запуск...",
+    "starting_client": "Запуск BrainLinkClient...",
+    "launch_failed": "Ошибка запуска",
+    "could_not_start": "Не удалось запустить BrainLinkClient",
+    "not_found": "Не найден",
+    "not_found_info": "BrainLinkClient не найден. Игра без BrainLink.",
+    "started_not_connected": "Запущен",
+    "started_not_connected_info": "BrainLink запущен, но не подключён. Игра без BrainLink."
+  },
+  "settings": {
+    "title": "Настройки",
+    "close": "Закрыть",
+    "tab_resolution": "Экран",
+    "tab_controls": "Управление",
+    "tab_brainlink": "BrainLink",
+    "current": "Текущий: {info}",
+    "resolution": "Разрешение:",
+    "fullscreen": "Полный экран:",
+    "apply_display": "Применить",
+    "fullscreen_mode": "полный экран",
+    "windowed_mode": "окно",
+    "display_format": "{w} x {h} ({mode})",
+    "cheater_mode": "Читерский режим:",
+    "cheater_hint": "(Бесконечная энергия)",
+    "language": "Язык:",
+    "lang_en": "English",
+    "lang_ru": "Русский",
+    "key_up": "Вверх (движение)",
+    "key_down": "Вниз (движение)",
+    "key_left": "Влево (движение)",
+    "key_right": "Вправо (движение)",
+    "key_sit": "Сидеть (×2 реген энергии)",
+    "key_sit_pause": "Сидеть + пауза",
+    "rebind_wait": "...",
+    "bl_send_keyboard": "Отправлять клавиши",
+    "bl_send_history": "Отправлять в историю",
+    "bl_send_ml": "Отправлять в ML",
+    "bl_send_events": "Отправлять события BrainLink",
+    "bl_conf_threshold": "Порог уверенности:",
+    "bl_min_confidence": "Мин. уверенность (огран. скорость):",
+    "bl_full_confidence": "Полная уверенность (макс. скорость):",
+    "bl_weights": "Веса (ml,mr,mu,md):",
+    "apply": "Применить",
+    "load_model": "Загрузить модель",
+    "save_model": "Сохранить модель"
+  },
+  "pause": {
+    "title": "Меню",
+    "restart": "Начать этап сначала",
+    "load": "Загрузить игру",
+    "settings": "Настройки",
+    "exit": "Выйти из игры"
+  },
+  "hud": {
+    "hp": "HP:",
+    "energy": "Энергия:",
+    "level": "Уровень: {level}",
+    "time": "Время: {seconds:.1f}с",
+    "ml": "ML: {value}",
+    "pred_conf": "pred: {pred}  conf: {conf}",
+    "pred_conf_dash": "pred: {pred}  conf: —",
+    "brainlink_connected": "BrainLink: подключён",
+    "brainlink_off": "BrainLink: выкл"
+  },
+  "dialog": {
+    "continue": "Далее [Пробел]"
+  },
+  "npc": {
+    "father": {
+      "name": "Отец",
+      "dialog1": "Привет, сын! Нельзя выходить одному!",
+      "dialog2": "Сыграем в игру? Там обезьяны...",
+      "exit": "Нельзя выходить одному! Давай лучше поиграем — на улице обезьяны!",
+      "play_minigame": "Мини-игра"
+    },
+    "mother": {
+      "name": "Мама",
+      "dialog1": "Привет, малыш! Ты уже поел?",
+      "dialog2": "Осторожнее с обезьянами!"
+    }
+  },
+  "minigame": {
+    "mode_title": "Выбор режима мини-игры",
+    "mode_text": "Выберите режим (откуда идут обезьяны):",
+    "leader_ns": "Лидер (Север–Юг): {name} — {time:.1f}с",
+    "leader_we": "Лидер (Запад–Восток): {name} — {time:.1f}с",
+    "mode_ns": "Север–Юг (обезьяны по верхнему и нижнему краю)",
+    "mode_we": "Запад–Восток (обезьяны по левому и правому краю)",
+    "top10": "Топ 10",
+    "system": "Система"
+  }
+}

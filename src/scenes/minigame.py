@@ -5,6 +5,7 @@ import random
 from panda3d.core import CardMaker, Vec3, TextNode
 from direct.gui.DirectGui import DirectFrame, DirectLabel
 from src.scenes.base_scene import BaseScene
+from src.core.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -798,8 +799,8 @@ class MinigameScene(BaseScene):
         )
         self.top10_frame.reparentTo(self.base.aspect2d)
         self.top10_frame.setBin("fixed", 50)
-        DirectLabel(
-            text="Top 10",
+        self.top10_title_label = DirectLabel(
+            text=t("minigame.top10"),
             text_scale=0.026,
             text_fg=(1, 0.9, 0.3, 1),
             frameColor=(0, 0, 0, 0),
@@ -894,6 +895,10 @@ class MinigameScene(BaseScene):
         
         except Exception as e:
             logger.warning(f"Error sending game event to BrainLink: {e}", exc_info=True)
+    
+    def refresh_locale(self):
+        if hasattr(self, "top10_title_label") and self.top10_title_label:
+            self.top10_title_label["text"] = t("minigame.top10")
     
     def exit(self):
         """Exit minigame"""

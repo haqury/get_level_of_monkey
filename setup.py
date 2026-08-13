@@ -18,7 +18,9 @@ setup(
             "platforms": ["win_amd64"],
             "include_patterns": [
                 "assets/**/*.png",
+                "assets/fonts/*.ttf",
                 "config/*.json",
+                "config/locale/*.json",
             ],
             "plugins": [
                 "pandagl",

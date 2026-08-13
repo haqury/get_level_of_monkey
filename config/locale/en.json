@@ -1,0 +1,119 @@
+{
+  "menu": {
+    "title": "Get Level of Monkey",
+    "subtitle": "2D Action Game with BrainLink Integration",
+    "play": "Play",
+    "config": "Config",
+    "quit": "Quit",
+    "back_to_game": "Back to game",
+    "player": "Player",
+    "controls_hint": "Controls: Arrow Keys or BrainLink (ml/mr/mu/md)",
+    "default_player_name": "Player"
+  },
+  "brainlink_status": {
+    "label": "BrainLink Status:",
+    "checking": "Checking...",
+    "searching_info": "Searching for BrainLinkClient...",
+    "connected": "Connected",
+    "ready": "BrainLink is ready!",
+    "ready_mind": "BrainLink is ready! You can control with your mind!",
+    "restarting": "Restarting...",
+    "enabling_shared_memory": "Enabling Shared Memory...",
+    "connecting": "Connecting...",
+    "waiting_shared_memory": "Waiting for Shared Memory...",
+    "restart_failed": "Restart Failed",
+    "restart_failed_info": "Could not restart BrainLinkClient. Enable Shared Memory manually.",
+    "searching": "Searching...",
+    "looking_for_client": "Looking for BrainLinkClient...",
+    "launching": "Launching...",
+    "starting_client": "Starting BrainLinkClient...",
+    "launch_failed": "Launch Failed",
+    "could_not_start": "Could not start BrainLinkClient",
+    "not_found": "Not Found",
+    "not_found_info": "BrainLinkClient not found. Playing without BrainLink.",
+    "started_not_connected": "Started",
+    "started_not_connected_info": "BrainLink started but not connected. Playing without BrainLink."
+  },
+  "settings": {
+    "title": "Settings",
+    "close": "Close",
+    "tab_resolution": "Resolution",
+    "tab_controls": "Controls",
+    "tab_brainlink": "BrainLink",
+    "current": "Current: {info}",
+    "resolution": "Resolution:",
+    "fullscreen": "Fullscreen:",
+    "apply_display": "Apply display",
+    "fullscreen_mode": "fullscreen",
+    "windowed_mode": "windowed",
+    "display_format": "{w} x {h} ({mode})",
+    "cheater_mode": "Cheater Mode:",
+    "cheater_hint": "(Unlimited Energy)",
+    "language": "Language:",
+    "lang_en": "English",
+    "lang_ru": "Русский",
+    "key_up": "Up (move)",
+    "key_down": "Down (move)",
+    "key_left": "Left (move)",
+    "key_right": "Right (move)",
+    "key_sit": "Sit (2x energy regen)",
+    "key_sit_pause": "Sit + Pause game",
+    "rebind_wait": "...",
+    "bl_send_keyboard": "Send Keyboard Events",
+    "bl_send_history": "Send to History",
+    "bl_send_ml": "Send to ML Training",
+    "bl_send_events": "Send BrainLink Events",
+    "bl_conf_threshold": "Confidence threshold:",
+    "bl_min_confidence": "Min confidence (limited speed):",
+    "bl_full_confidence": "Full confidence (max speed):",
+    "bl_weights": "Weights (ml,mr,mu,md):",
+    "apply": "Apply",
+    "load_model": "Load model",
+    "save_model": "Save model"
+  },
+  "pause": {
+    "title": "Menu",
+    "restart": "Restart current stage",
+    "load": "Load game",
+    "settings": "Settings",
+    "exit": "Exit game"
+  },
+  "hud": {
+    "hp": "HP:",
+    "energy": "Energy:",
+    "level": "Level: {level}",
+    "time": "Time: {seconds:.1f}s",
+    "ml": "ML: {value}",
+    "pred_conf": "pred: {pred}  conf: {conf}",
+    "pred_conf_dash": "pred: {pred}  conf: —",
+    "brainlink_connected": "BrainLink: connected",
+    "brainlink_off": "BrainLink: off"
+  },
+  "dialog": {
+    "continue": "Continue [Space]"
+  },
+  "npc": {
+    "father": {
+      "name": "Father",
+      "dialog1": "Hello, son! You can't go out alone!",
+      "dialog2": "Want to play a game? There are monkeys...",
+      "exit": "You can't go out alone! Let's play a game instead - there are monkeys outside!",
+      "play_minigame": "Play Minigame"
+    },
+    "mother": {
+      "name": "Mother",
+      "dialog1": "Hello, little one! Have you eaten yet?",
+      "dialog2": "Be careful with the monkeys!"
+    }
+  },
+  "minigame": {
+    "mode_title": "Minigame Mode Selection",
+    "mode_text": "Choose minigame mode (determines where monkeys walk from):",
+    "leader_ns": "Leader (North-South): {name} — {time:.1f}s",
+    "leader_we": "Leader (West-East): {name} — {time:.1f}s",
+    "mode_ns": "North-South (monkeys walk along top and bottom edges)",
+    "mode_we": "West-East (monkeys walk along left and right edges)",
+    "top10": "Top 10",
+    "system": "System"
+  }
+}

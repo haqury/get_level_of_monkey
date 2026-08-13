@@ -12,6 +12,7 @@ import tkinter as tk
 from direct.gui.OnscreenText import OnscreenText
 from panda3d.core import TextNode, CardMaker
 from src.scenes.base_scene import BaseScene
+from src.core.i18n import t, get_locale
 
 logger = logging.getLogger(__name__)
 
@@ -36,27 +37,25 @@ class MainMenuScene(BaseScene):
         logger.info("MainMenu scene created")
     
     def _create_background(self):
-        """Create modern gradient background for menu"""
-        # Create a large background card covering the screen
+        """Create modern gradient background for menu (aspect-correct)."""
+        aspect = self.base.getAspectRatio()
         cm = CardMaker("menu_bg")
-        cm.setFrame(-2, 2, -1.5, 1.5)  # Full screen coverage
-        
-        self.background = self.base.render2d.attachNewNode(cm.generate())
+        cm.setFrame(-aspect, aspect, -1, 1)
+
+        self.background = self.base.aspect2d.attachNewNode(cm.generate())
         self.background.setPos(0, 0, 0)
-        # Dark blue-purple gradient effect (using solid color as approximation)
-        self.background.setColor(0.08, 0.05, 0.15, 1.0)  # Dark purple-blue
+        self.background.setColor(0.08, 0.05, 0.15, 1.0)
         self.background.setTransparency(0)
-        
-        # Create a subtle overlay for depth
+
         cm_overlay = CardMaker("menu_overlay")
-        cm_overlay.setFrame(-2, 2, -1.5, 1.5)
-        overlay = self.base.render2d.attachNewNode(cm_overlay.generate())
-        overlay.setPos(0, 0, -0.01)  # Slightly behind main background
-        overlay.setColor(0.05, 0.03, 0.1, 0.3)  # Subtle overlay
+        cm_overlay.setFrame(-aspect, aspect, -1, 1)
+        overlay = self.base.aspect2d.attachNewNode(cm_overlay.generate())
+        overlay.setPos(0, 0, -0.01)
+        overlay.setColor(0.05, 0.03, 0.1, 0.3)
         overlay.setTransparency(1)
         self.background_overlay = overlay
-        
-        logger.debug("Menu background created")
+
+        logger.debug("Menu background created (aspect2d, aspect=%.2f)", aspect)
     
     def _create_ui(self):
         """Create menu UI"""
@@ -67,25 +66,25 @@ class MainMenuScene(BaseScene):
         
         # Title - properly scaled for modern resolutions
         self.title = OnscreenText(
-            text="Get Level of Monkey",
+            text=t("menu.title"),
             pos=(0, 0.65),
             scale=0.12,
             fg=(1.0, 0.9, 0.3, 1),  # Golden yellow
             shadow=(0, 0, 0, 1.0),
             shadowOffset=(0.02, 0.02),
-            mayChange=False,
+            mayChange=True,
             font=font,
             align=TextNode.ACenter
         )
         
         # Subtitle - properly scaled
         self.subtitle = OnscreenText(
-            text="2D Action Game with BrainLink Integration",
+            text=t("menu.subtitle"),
             pos=(0, 0.52),
             scale=0.035,
             fg=(0.9, 0.9, 0.9, 1),
             shadow=(0, 0, 0, 0.6),
-            mayChange=False,
+            mayChange=True,
             font=font,
             align=TextNode.ACenter
         )
@@ -101,7 +100,7 @@ class MainMenuScene(BaseScene):
         
         # BrainLink status label
         self.brainlink_status_label = DirectLabel(
-            text="BrainLink Status:",
+            text=t("brainlink_status.label"),
             text_scale=0.04,
             text_fg=(0.9, 0.9, 1.0, 1),
             text_align=TextNode.ACenter,
@@ -113,7 +112,7 @@ class MainMenuScene(BaseScene):
         
         # Status text - properly scaled
         self.status_text = DirectLabel(
-            text="Checking...",
+            text=t("brainlink_status.checking"),
             text_scale=0.045,
             text_fg=(1, 1, 0.5, 1),
             text_align=TextNode.ACenter,
@@ -125,7 +124,7 @@ class MainMenuScene(BaseScene):
         
         # Info text
         self.info_text = DirectLabel(
-            text="Searching for BrainLinkClient...",
+            text=t("brainlink_status.searching_info"),
             text_scale=0.032,
             text_fg=(0.75, 0.75, 0.75, 1),
             text_align=TextNode.ACenter,
@@ -139,7 +138,7 @@ class MainMenuScene(BaseScene):
         # Button height is 0.2 (from -0.1 to 0.1), so buttons will be spaced 0.2 apart
         # Moved down by 1/10 screen (0.2 units)
         self.play_btn = DirectButton(
-            text="Play",
+            text=t("menu.play"),
             text_scale=0.035,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.2, 0.6, 0.2, 1),
@@ -154,10 +153,10 @@ class MainMenuScene(BaseScene):
             self._apply_font_to_button(self.play_btn, font)
 
         # Player name input
-        player_name = (self.base.game_config.get("player", {}).get("name") or "Player") if hasattr(self.base, 'game_config') else "Player"
+        player_name = (self.base.game_config.get("player", {}).get("name") or t("menu.default_player_name")) if hasattr(self.base, 'game_config') else t("menu.default_player_name")
         # Выбор игрока — на 1/6 экрана выше (z: -0.2 + 1/6*2 ≈ 0.13)
         self.player_name_label = DirectLabel(
-            text="Player:",
+            text=t("menu.player") + ":",
             text_scale=0.032,
             text_fg=(0.9, 0.9, 0.9, 1),
             frameColor=(0, 0, 0, 0),
@@ -167,7 +166,7 @@ class MainMenuScene(BaseScene):
         )
         self.player_name_entry = DirectEntry(
             scale=0.032,
-            initialText=(player_name[:30] if player_name else "Player"),
+            initialText=(player_name[:30] if player_name else t("menu.default_player_name")),
             numLines=1,
             width=14,
             pos=(0.05, 0, 0.13),
@@ -179,11 +178,10 @@ class MainMenuScene(BaseScene):
             cursorKeys=1,
             command=self._apply_player_name_from_entry,
         )
-        self.player_name_entry.enterText(player_name[:30] if player_name else "Player")
+        self.player_name_entry.enterText(player_name[:30] if player_name else t("menu.default_player_name"))
 
-        # Settings button - touching Play button (Play bottom at -0.4, Config top at -0.4, center at -0.5)
         self.settings_btn = DirectButton(
-            text="Config",
+            text=t("menu.config"),
             text_scale=0.03,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.2, 0.2, 0.6, 1),
@@ -197,7 +195,7 @@ class MainMenuScene(BaseScene):
         
         # Quit button - touching Config button (Config bottom at -0.6, Quit top at -0.6, center at -0.7)
         self.quit_btn = DirectButton(
-            text="Quit",
+            text=t("menu.quit"),
             text_scale=0.035,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.6, 0.2, 0.2, 1),
@@ -211,7 +209,7 @@ class MainMenuScene(BaseScene):
 
         # Back to game (shown only when opened settings from pause)
         self.back_to_game_btn = DirectButton(
-            text="Back to game",
+            text=t("menu.back_to_game"),
             text_scale=0.032,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.2, 0.5, 0.3, 1),
@@ -226,12 +224,12 @@ class MainMenuScene(BaseScene):
         
         # Controls info - properly scaled, positioned just below Quit button
         self.controls_text = OnscreenText(
-            text="Controls: Arrow Keys or BrainLink (ml/mr/mu/md)",
+            text=t("menu.controls_hint"),
             pos=(0, -0.85),
             scale=0.028,
             fg=(0.7, 0.7, 0.7, 1),
             shadow=(0, 0, 0, 0.5),
-            mayChange=False,
+            mayChange=True,
             font=font,
             align=TextNode.ACenter
         )
@@ -300,7 +298,7 @@ class MainMenuScene(BaseScene):
         """Save player name from main menu input field."""
         if not hasattr(self, "player_name_entry"):
             return
-        new_name = (self.player_name_entry.get() or "").strip()[:30] or "Player"
+        new_name = (self.player_name_entry.get() or "").strip()[:30] or t("menu.default_player_name")
         self.player_name_entry.enterText(new_name)
         if hasattr(self.base, 'game_config'):
             self.base.game_config.setdefault("player", {})["name"] = new_name
@@ -367,7 +365,7 @@ class MainMenuScene(BaseScene):
 
         # Title
         self.settings_title = DirectLabel(
-            text="Settings",
+            text=t("settings.title"),
             text_scale=0.055,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
@@ -387,7 +385,7 @@ class MainMenuScene(BaseScene):
         
         # Close button — на 1/6 экрана ниже (aspect2d: ~0.17 вниз)
         self.settings_close_btn = DirectButton(
-            text="Close",
+            text=t("settings.close"),
             text_scale=0.04,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.5, 0.2, 0.2, 1),
@@ -413,10 +411,16 @@ class MainMenuScene(BaseScene):
         
         # Tab button width is 0.36 (from -0.18 to 0.18), so spacing them with gaps
         tab_positions = [
-            ("Resolution", "resolution", -0.45),
-            ("Controls", "controls", -0.05),
-            ("BrainLink", "brainlink", 0.35)
+            (t("settings.tab_resolution"), "resolution", -0.45),
+            (t("settings.tab_controls"), "controls", -0.05),
+            (t("settings.tab_brainlink"), "brainlink", 0.35)
         ]
+        
+        self._tab_label_keys = {
+            "resolution": "settings.tab_resolution",
+            "controls": "settings.tab_controls",
+            "brainlink": "settings.tab_brainlink",
+        }
         
         for text, tab_id, x_pos in tab_positions:
             btn = DirectButton(
@@ -445,42 +449,143 @@ class MainMenuScene(BaseScene):
             pos=(0, 0, 0.05),
             parent=self.settings_frame
         )
-        
-        # Resolution label
-        DirectLabel(
-            text="Resolution:",
+
+        fullscreen = False
+        if hasattr(self.base, "game_config"):
+            fullscreen = bool(self.base.game_config.get("window", {}).get("fullscreen", False))
+
+        self.resolution_status_label = DirectLabel(
+            text=self._resolution_status_text(),
+            text_scale=0.028,
+            text_fg=(0.85, 0.85, 0.95, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, 0.2),
+            parent=self.resolution_frame,
+            text_font=font,
+            text_align=TextNode.ACenter,
+        )
+
+        self.resolution_resolution_label = DirectLabel(
+            text=t("settings.resolution"),
             text_scale=0.04,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
-            pos=(-0.5, 0, 0.15),
+            pos=(-0.5, 0, 0.12),
             parent=self.resolution_frame,
             text_font=font,
-            text_align=TextNode.ALeft
+            text_align=TextNode.ALeft,
         )
-        
-        # Resolution buttons
-        def add_resolution_button(text, width, height, fullscreen, z):
+
+        self.resolution_buttons = {}
+
+        def add_resolution_button(text, width, height, z):
             btn = DirectButton(
                 text=text,
-                text_scale=0.032,
+                text_scale=0.03,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0.25, 0.25, 0.35, 1),
-                frameSize=(-0.45, 0.45, -0.05, 0.05),
+                frameSize=(-0.45, 0.45, -0.045, 0.045),
                 pos=(0, 0, z),
-                command=self._apply_resolution,
-                extraArgs=[width, height, fullscreen],
+                command=self._apply_resolution_preset,
+                extraArgs=[width, height],
                 parent=self.resolution_frame,
                 text_font=font,
                 relief=1,
-                borderWidth=(0.005, 0.005)
+                borderWidth=(0.005, 0.005),
             )
             if font:
                 self._apply_font_to_button(btn, font)
+            self.resolution_buttons[(width, height)] = btn
             return btn
 
-        self.btn_res_1280 = add_resolution_button("1280 x 720 (Windowed)", 1280, 720, False, 0.05)
-        self.btn_res_1600 = add_resolution_button("1600 x 900 (Windowed)", 1600, 900, False, -0.05)
-        self.btn_res_1920 = add_resolution_button("1920 x 1080 (Fullscreen)", 1920, 1080, True, -0.15)
+        self.btn_res_1280 = add_resolution_button("1280 x 720", 1280, 720, 0.03)
+        self.btn_res_1600 = add_resolution_button("1600 x 900", 1600, 900, -0.07)
+        self.btn_res_1920 = add_resolution_button("1920 x 1080", 1920, 1080, -0.17)
+
+        self.resolution_fullscreen_label = DirectLabel(
+            text=t("settings.fullscreen"),
+            text_scale=0.035,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.45, 0, -0.28),
+            parent=self.resolution_frame,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        self.fullscreen_checkbox = DirectButton(
+            text="+" if fullscreen else "",
+            text_scale=0.05,
+            text_fg=(0.9, 1, 0.9, 1) if fullscreen else (0.5, 0.5, 0.5, 1),
+            frameColor=(0.15, 0.4, 0.2, 1) if fullscreen else (0.22, 0.22, 0.28, 1),
+            frameSize=(-0.055, 0.055, -0.045, 0.045),
+            pos=(0.35, 0, -0.28),
+            command=self._toggle_fullscreen_setting,
+            parent=self.resolution_frame,
+            text_font=font,
+            relief=2,
+            borderWidth=(0.008, 0.008),
+        )
+
+        self.apply_display_btn = DirectButton(
+            text=t("settings.apply_display"),
+            text_scale=0.03,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.25, 0.4, 0.25, 1),
+            frameSize=(-0.14, 0.14, -0.04, 0.04),
+            pos=(0, 0, -0.38),
+            command=self._apply_current_display_settings,
+            parent=self.resolution_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.003, 0.003),
+        )
+
+        self._refresh_resolution_ui()
+
+    def _resolution_status_text(self) -> str:
+        if hasattr(self.base, "get_window_display_info"):
+            return t("settings.current", info=self.base.get_window_display_info())
+        cfg = getattr(self.base, "game_config", {}).get("window", {})
+        info = f"{cfg.get('width', '?')} x {cfg.get('height', '?')}"
+        return t("settings.current", info=info)
+
+    def _refresh_resolution_ui(self):
+        """Highlight active resolution preset and refresh status label."""
+        if hasattr(self, "resolution_status_label"):
+            self.resolution_status_label["text"] = self._resolution_status_text()
+        cfg = getattr(self.base, "game_config", {}).get("window", {})
+        current = (int(cfg.get("width", 0)), int(cfg.get("height", 0)))
+        active_color = (0.3, 0.45, 0.55, 1)
+        idle_color = (0.25, 0.25, 0.35, 1)
+        for (w, h), btn in getattr(self, "resolution_buttons", {}).items():
+            btn["frameColor"] = active_color if (w, h) == current else idle_color
+        fs = bool(cfg.get("fullscreen", False))
+        if hasattr(self, "fullscreen_checkbox"):
+            self.fullscreen_checkbox["text"] = "+" if fs else ""
+            self.fullscreen_checkbox["text_fg"] = (0.9, 1, 0.9, 1) if fs else (0.5, 0.5, 0.5, 1)
+            self.fullscreen_checkbox["frameColor"] = (0.15, 0.4, 0.2, 1) if fs else (0.22, 0.22, 0.28, 1)
+
+    def _is_fullscreen_enabled(self) -> bool:
+        if hasattr(self, "fullscreen_checkbox"):
+            return bool(self.fullscreen_checkbox["text"])
+        return bool(getattr(self.base, "game_config", {}).get("window", {}).get("fullscreen", False))
+
+    def _toggle_fullscreen_setting(self):
+        enabled = self._is_fullscreen_enabled()
+        self.fullscreen_checkbox["text"] = "" if enabled else "+"
+        self.fullscreen_checkbox["text_fg"] = (0.5, 0.5, 0.5, 1) if enabled else (0.9, 1, 0.9, 1)
+        self.fullscreen_checkbox["frameColor"] = (0.22, 0.22, 0.28, 1) if enabled else (0.15, 0.4, 0.2, 1)
+
+    def _apply_resolution_preset(self, width: int, height: int):
+        """Apply selected windowed resolution or native fullscreen size."""
+        self._apply_resolution(width, height, self._is_fullscreen_enabled())
+
+    def _apply_current_display_settings(self):
+        """Re-apply current preset + fullscreen checkbox."""
+        cfg = getattr(self.base, "game_config", {}).get("window", {})
+        width = int(cfg.get("width", 1920))
+        height = int(cfg.get("height", 1080))
+        self._apply_resolution(width, height, self._is_fullscreen_enabled())
     
     def _create_controls_tab(self, font):
         """Create controls settings tab with cheater mode and keyboard rebind"""
@@ -497,8 +602,8 @@ class MainMenuScene(BaseScene):
             cheater_mode = self.base.game_config.get("player", {}).get("cheater_mode", False)
         
         # Cheater Mode checkbox
-        DirectLabel(
-            text="Cheater Mode:",
+        self.cheater_mode_label = DirectLabel(
+            text=t("settings.cheater_mode"),
             text_scale=0.04,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
@@ -508,8 +613,8 @@ class MainMenuScene(BaseScene):
             text_align=TextNode.ALeft
         )
         
-        DirectLabel(
-            text="(Unlimited Energy)",
+        self.cheater_mode_hint = DirectLabel(
+            text=t("settings.cheater_hint"),
             text_scale=0.03,
             text_fg=(0.7, 0.7, 0.7, 1),
             frameColor=(0, 0, 0, 0),
@@ -538,18 +643,19 @@ class MainMenuScene(BaseScene):
         default_keys = {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}
         controls_cfg = self.base.game_config.get("controls", {}).get("keyboard", default_keys) if hasattr(self.base, "game_config") else default_keys
         key_labels = [
-            ("Up (move)", "up"),
-            ("Down (move)", "down"),
-            ("Left (move)", "left"),
-            ("Right (move)", "right"),
-            ("Sit (2x energy regen)", "action"),
-            ("Sit + Pause game", "sit_pause"),
+            ("settings.key_up", "up"),
+            ("settings.key_down", "down"),
+            ("settings.key_left", "left"),
+            ("settings.key_right", "right"),
+            ("settings.key_sit", "action"),
+            ("settings.key_sit_pause", "sit_pause"),
         ]
         self.controls_key_buttons = {}
-        for i, (label, action) in enumerate(key_labels):
+        self.controls_action_labels = {}
+        for i, (label_key, action) in enumerate(key_labels):
             z = 0.05 - (i + 1) * 0.08
-            DirectLabel(
-                text=label + ":",
+            lbl = DirectLabel(
+                text=t(label_key) + ":",
                 text_scale=0.032,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0, 0, 0, 0),
@@ -558,6 +664,7 @@ class MainMenuScene(BaseScene):
                 text_font=font,
                 text_align=TextNode.ALeft
             )
+            self.controls_action_labels[action] = (lbl, label_key)
             key_name = controls_cfg.get(action, default_keys.get(action, "?"))
             btn = DirectButton(
                 text=self._key_display_name(key_name),
@@ -574,6 +681,48 @@ class MainMenuScene(BaseScene):
                 borderWidth=(0.004, 0.004)
             )
             self.controls_key_buttons[action] = btn
+        
+        current_locale = getattr(self.base, "game_config", {}).get("locale", get_locale())
+        self.language_label = DirectLabel(
+            text=t("settings.language"),
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.45, 0, -0.48),
+            parent=self.controls_frame,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        active_lang = (0.3, 0.5, 0.35, 1)
+        idle_lang = (0.25, 0.25, 0.35, 1)
+        self.lang_btn_en = DirectButton(
+            text=t("settings.lang_en"),
+            text_scale=0.028,
+            text_fg=(1, 1, 1, 1),
+            frameColor=active_lang if current_locale == "en" else idle_lang,
+            frameSize=(-0.12, 0.12, -0.035, 0.035),
+            pos=(0.05, 0, -0.48),
+            command=self._set_language,
+            extraArgs=["en"],
+            parent=self.controls_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.004, 0.004),
+        )
+        self.lang_btn_ru = DirectButton(
+            text=t("settings.lang_ru"),
+            text_scale=0.028,
+            text_fg=(1, 1, 1, 1),
+            frameColor=active_lang if current_locale == "ru" else idle_lang,
+            frameSize=(-0.12, 0.12, -0.035, 0.035),
+            pos=(0.28, 0, -0.48),
+            command=self._set_language,
+            extraArgs=["ru"],
+            parent=self.controls_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.004, 0.004),
+        )
         
         self._rebind_action = None
         self.REBIND_KEYS = [
@@ -597,7 +746,7 @@ class MainMenuScene(BaseScene):
         self._rebind_action = action
         btn = self.controls_key_buttons.get(action)
         if btn:
-            btn["text"] = "..."
+            btn["text"] = t("settings.rebind_wait")
         for key in self.REBIND_KEYS:
             self.base.accept(key, self._on_rebind_key, [key])
     
@@ -653,17 +802,17 @@ class MainMenuScene(BaseScene):
         
         # BrainLink settings checkboxes (same style as other tabs: button as checkbox)
         settings = [
-            ("Send Keyboard Events", "send_keyboard_events", 0.15, bl_config.get("send_keyboard_events", True)),
-            ("Send to History", "send_to_history", 0.05, bl_config.get("send_to_history", True)),
-            ("Send to ML Training", "send_to_ml", -0.05, bl_config.get("send_to_ml", True)),
-            ("Send BrainLink Events", "send_brainlink_events", -0.15, bl_config.get("send_brainlink_events", True)),
+            ("settings.bl_send_keyboard", "send_keyboard_events", 0.15, bl_config.get("send_keyboard_events", True)),
+            ("settings.bl_send_history", "send_to_history", 0.05, bl_config.get("send_to_history", True)),
+            ("settings.bl_send_ml", "send_to_ml", -0.05, bl_config.get("send_to_ml", True)),
+            ("settings.bl_send_events", "send_brainlink_events", -0.15, bl_config.get("send_brainlink_events", True)),
         ]
         
         self.brainlink_checkboxes = {}
-        for label, key, z_pos, default_value in settings:
-            # Label
-            DirectLabel(
-                text=label + ":",
+        self.brainlink_setting_labels = {}
+        for label_key, key, z_pos, default_value in settings:
+            lbl = DirectLabel(
+                text=t(label_key) + ":",
                 text_scale=0.035,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0, 0, 0, 0),
@@ -672,8 +821,8 @@ class MainMenuScene(BaseScene):
                 text_font=font,
                 text_align=TextNode.ALeft
             )
+            self.brainlink_setting_labels[key] = (lbl, label_key)
             
-            # Checkbox — явный квадрат с рамкой и галочкой
             checkbox = DirectButton(
                 text="+" if default_value else "",
                 text_scale=0.05,
@@ -705,11 +854,13 @@ class MainMenuScene(BaseScene):
                 self._brainlink_apply_single_field(key)
             return _cmd
 
-        def _config_entry_row(label_text, z_pos, config_key, default_val, width=8):
+        self.brainlink_field_labels = {}
+
+        def _config_entry_row(label_key, z_pos, config_key, default_val, width=8):
             val = bl_config.get(config_key, default_val)
             text = _float_fmt(val)
-            DirectLabel(
-                text=label_text,
+            lbl = DirectLabel(
+                text=t(label_key),
                 text_scale=0.032,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0, 0, 0, 0),
@@ -718,6 +869,7 @@ class MainMenuScene(BaseScene):
                 text_font=font,
                 text_align=TextNode.ALeft,
             )
+            self.brainlink_field_labels[config_key] = (lbl, label_key)
             entry = DirectEntry(
                 parent=self.brainlink_frame,
                 scale=0.04,
@@ -750,21 +902,21 @@ class MainMenuScene(BaseScene):
 
         self.brainlink_entries = {
             "confidence_threshold": {
-                "entry": _config_entry_row("Confidence threshold:", -0.26, "confidence_threshold", 0.5),
+                "entry": _config_entry_row("settings.bl_conf_threshold", -0.26, "confidence_threshold", 0.5),
                 "default": 0.5,
                 "parse": _float_parse,
                 "fmt": _float_fmt,
                 "clamp": (0.0, 1.0),
             },
             "min_confidence": {
-                "entry": _config_entry_row("Min confidence (limited speed):", -0.32, "min_confidence", 0.25),
+                "entry": _config_entry_row("settings.bl_min_confidence", -0.32, "min_confidence", 0.25),
                 "default": 0.25,
                 "parse": _float_parse,
                 "fmt": _float_fmt,
                 "clamp": (0.0, 1.0),
             },
             "full_confidence": {
-                "entry": _config_entry_row("Full confidence (max speed):", -0.38, "full_confidence", 0.7),
+                "entry": _config_entry_row("settings.bl_full_confidence", -0.38, "full_confidence", 0.7),
                 "default": 0.7,
                 "parse": _float_parse,
                 "fmt": _float_fmt,
@@ -775,8 +927,8 @@ class MainMenuScene(BaseScene):
         weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
         weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
 
-        DirectLabel(
-            text="Weights (ml,mr,mu,md):",
+        self.brainlink_weights_label = DirectLabel(
+            text=t("settings.bl_weights"),
             text_scale=0.032,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
@@ -807,8 +959,8 @@ class MainMenuScene(BaseScene):
         )
         self.brainlink_weights_entry.enterText(weights_str)
 
-        DirectButton(
-            text="Apply",
+        self.brainlink_apply_btn = DirectButton(
+            text=t("settings.apply"),
             text_scale=0.03,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.25, 0.4, 0.25, 1),
@@ -822,8 +974,8 @@ class MainMenuScene(BaseScene):
         )
 
         # Load / Save model buttons
-        DirectButton(
-            text="Load model",
+        self.brainlink_load_model_btn = DirectButton(
+            text=t("settings.load_model"),
             text_scale=0.03,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.25, 0.25, 0.4, 1),
@@ -835,8 +987,8 @@ class MainMenuScene(BaseScene):
             relief=1,
             borderWidth=(0.003, 0.003)
         )
-        DirectButton(
-            text="Save model",
+        self.brainlink_save_model_btn = DirectButton(
+            text=t("settings.save_model"),
             text_scale=0.03,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.25, 0.4, 0.25, 1),
@@ -1081,6 +1233,7 @@ class MainMenuScene(BaseScene):
         if tab_id == "resolution":
             self.resolution_frame.show()
             self.settings_tabs["resolution"]['frameColor'] = (0.3, 0.3, 0.5, 1)
+            self._refresh_resolution_ui()
         elif tab_id == "controls":
             self.controls_frame.show()
             self.settings_tabs["controls"]['frameColor'] = (0.3, 0.3, 0.5, 1)
@@ -1150,6 +1303,71 @@ class MainMenuScene(BaseScene):
         
         logger.info(f"Cheater mode {'enabled' if new_value else 'disabled'}")
     
+    def _set_language(self, locale: str):
+        """Switch UI language."""
+        if hasattr(self.base, "set_locale"):
+            self.base.set_locale(locale)
+        self._refresh_language_buttons()
+    
+    def _refresh_language_buttons(self):
+        locale = getattr(self.base, "game_config", {}).get("locale", get_locale())
+        active = (0.3, 0.5, 0.35, 1)
+        idle = (0.25, 0.25, 0.35, 1)
+        if hasattr(self, "lang_btn_en"):
+            self.lang_btn_en["frameColor"] = active if locale == "en" else idle
+        if hasattr(self, "lang_btn_ru"):
+            self.lang_btn_ru["frameColor"] = active if locale == "ru" else idle
+    
+    def refresh_locale(self):
+        """Update all menu/settings strings after language change."""
+        self.title.setText(t("menu.title"))
+        self.subtitle.setText(t("menu.subtitle"))
+        self.brainlink_status_label["text"] = t("brainlink_status.label")
+        self.play_btn["text"] = t("menu.play")
+        self.player_name_label["text"] = t("menu.player") + ":"
+        self.settings_btn["text"] = t("menu.config")
+        self.quit_btn["text"] = t("menu.quit")
+        self.back_to_game_btn["text"] = t("menu.back_to_game")
+        self.controls_text.setText(t("menu.controls_hint"))
+        self.settings_title["text"] = t("settings.title")
+        self.settings_close_btn["text"] = t("settings.close")
+        for tab_id, btn in getattr(self, "settings_tabs", {}).items():
+            key = getattr(self, "_tab_label_keys", {}).get(tab_id)
+            if key:
+                btn["text"] = t(key)
+        if hasattr(self, "resolution_resolution_label"):
+            self.resolution_resolution_label["text"] = t("settings.resolution")
+        if hasattr(self, "resolution_fullscreen_label"):
+            self.resolution_fullscreen_label["text"] = t("settings.fullscreen")
+        if hasattr(self, "apply_display_btn"):
+            self.apply_display_btn["text"] = t("settings.apply_display")
+        self._refresh_resolution_ui()
+        if hasattr(self, "cheater_mode_label"):
+            self.cheater_mode_label["text"] = t("settings.cheater_mode")
+        if hasattr(self, "cheater_mode_hint"):
+            self.cheater_mode_hint["text"] = t("settings.cheater_hint")
+        for action, (lbl, key) in getattr(self, "controls_action_labels", {}).items():
+            lbl["text"] = t(key) + ":"
+        if hasattr(self, "language_label"):
+            self.language_label["text"] = t("settings.language")
+        if hasattr(self, "lang_btn_en"):
+            self.lang_btn_en["text"] = t("settings.lang_en")
+        if hasattr(self, "lang_btn_ru"):
+            self.lang_btn_ru["text"] = t("settings.lang_ru")
+        self._refresh_language_buttons()
+        for key, (lbl, label_key) in getattr(self, "brainlink_setting_labels", {}).items():
+            lbl["text"] = t(label_key) + ":"
+        for config_key, (lbl, label_key) in getattr(self, "brainlink_field_labels", {}).items():
+            lbl["text"] = t(label_key)
+        if hasattr(self, "brainlink_weights_label"):
+            self.brainlink_weights_label["text"] = t("settings.bl_weights")
+        if hasattr(self, "brainlink_apply_btn"):
+            self.brainlink_apply_btn["text"] = t("settings.apply")
+        if hasattr(self, "brainlink_load_model_btn"):
+            self.brainlink_load_model_btn["text"] = t("settings.load_model")
+        if hasattr(self, "brainlink_save_model_btn"):
+            self.brainlink_save_model_btn["text"] = t("settings.save_model")
+    
     def _save_brainlink_config(self):
         """Save BrainLink config to game_config.json"""
         self._save_game_config()
@@ -1172,6 +1390,8 @@ class MainMenuScene(BaseScene):
                 config["controls"] = self.base.game_config["controls"]
             if "window" in self.base.game_config:
                 config["window"] = self.base.game_config["window"]
+            if "locale" in self.base.game_config:
+                config["locale"] = self.base.game_config["locale"]
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
             logger.info(f"Saved game config to {config_path}")
@@ -1183,6 +1403,7 @@ class MainMenuScene(BaseScene):
         if self.settings_frame.isHidden():
             self.settings_frame.show()
             self._refresh_brainlink_entries_from_config()
+            self._refresh_resolution_ui()
             # Hide main menu buttons when settings are open to prevent overlap
             self.play_btn.hide()
             self.back_to_game_btn.hide()
@@ -1210,6 +1431,7 @@ class MainMenuScene(BaseScene):
                 self.base.apply_resolution(width, height, fullscreen)
             else:
                 logger.warning("Base has no 'apply_resolution' method")
+            self._refresh_resolution_ui()
         except Exception as e:
             logger.error(f"Failed to apply resolution from settings: {e}")
     

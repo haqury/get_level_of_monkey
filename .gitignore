@@ -35,6 +35,7 @@ env/
 # Game specific
 saves/*.json
 *.log
+assets/fonts/segoeui.ttf
 
 # OS
 .DS_Store

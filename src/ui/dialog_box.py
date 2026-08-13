@@ -3,6 +3,7 @@
 import logging
 from direct.gui.DirectGui import DirectFrame, DirectButton, DirectLabel
 from panda3d.core import TextNode
+from src.core.i18n import t, resolve_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class DialogBox:
         
         # Continue button
         self.continue_btn = DirectButton(
-            text="Continue [Space]",
+            text=t("dialog.continue"),
             text_scale=0.05,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.3, 0.3, 0.3, 1),
@@ -126,6 +127,8 @@ class DialogBox:
         """
         # Clear previous options
         self._clear_options()
+        
+        dialog = resolve_dialog(dialog)
         
         self.current_npc = npc
         self.current_dialog = dialog
@@ -232,6 +235,15 @@ class DialogBox:
         else:
             logger.warning("No callback provided!")
         self.hide()
+    
+    def refresh_locale(self):
+        """Refresh static dialog UI strings."""
+        self.continue_btn["text"] = t("dialog.continue")
+        if self.is_visible and self.current_dialog:
+            if self.current_npc:
+                self.name_label["text"] = self.current_npc.name
+            elif self.current_dialog.get("title"):
+                self.name_label["text"] = self.current_dialog["title"]
     
     def hide(self):
         """Hide dialog"""

@@ -43,5 +43,6 @@
       "action": "space",
       "sit_pause": "p"
     }
-  }
+  },
+  "locale": "ru"
 }

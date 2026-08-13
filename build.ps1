@@ -8,6 +8,17 @@ if (-not (Test-Path $python)) {
     throw "Virtual environment not found. Run: python -m venv venv; venv\Scripts\activate; pip install -r requirements.txt"
 }
 
+$fontDir = Join-Path $ProjectRoot "assets\fonts"
+$bundledFont = Join-Path $fontDir "segoeui.ttf"
+if (-not (Test-Path $bundledFont)) {
+    New-Item -ItemType Directory -Force -Path $fontDir | Out-Null
+    $systemFont = Join-Path $env:WINDIR "Fonts\segoeui.ttf"
+    if (Test-Path $systemFont) {
+        Copy-Item $systemFont $bundledFont
+        Write-Host "Bundled UI font: segoeui.ttf"
+    }
+}
+
 Write-Host "Installing build dependencies..."
 & $python -m pip install -q setuptools wheel
 
