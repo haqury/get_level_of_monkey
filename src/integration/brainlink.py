@@ -20,6 +20,7 @@ CODE_TO_EVENT = {
     3: "mu",    # Move Up
     4: "md",    # Move Down
     5: "stop",  # Stop
+    6: "ne",    # No event / neutral (остановка, ничего не делаем)
 }
 
 EVENT_TO_CODE = {v: k for k, v in CODE_TO_EVENT.items()}
@@ -234,7 +235,7 @@ class BrainLinkClient:
         Send event to BrainLink Client to save in history
         
         Args:
-            event_name: Event name ("ml", "mr", "mu", "md", "stop")
+            event_name: Event name ("ml", "mr", "mu", "md", "stop", "ne")
         
         Returns:
             True if command sent successfully
@@ -246,9 +247,9 @@ class BrainLinkClient:
         try:
             import time
             
-            # Convert event name to code
+            # Convert event name to code (0 = unknown, "ne" = 6)
             event_code = EVENT_TO_CODE.get(event_name, 0)
-            if event_code == 0:
+            if event_code == 0 and event_name != "":
                 logger.warning(f"Unknown event name: {event_name}")
                 return False
             
@@ -284,7 +285,7 @@ class BrainLinkClient:
         Send event to BrainLink Client for ML training
         
         Args:
-            event_name: Event name ("ml", "mr", "mu", "md", "stop")
+            event_name: Event name ("ml", "mr", "mu", "md", "stop", "ne")
         
         Returns:
             True if command sent successfully
@@ -296,9 +297,9 @@ class BrainLinkClient:
         try:
             import time
             
-            # Convert event name to code
+            # Convert event name to code (0 = unknown, "ne" = 6)
             event_code = EVENT_TO_CODE.get(event_name, 0)
-            if event_code == 0:
+            if event_code == 0 and event_name != "":
                 logger.warning(f"Unknown event name: {event_name}")
                 return False
             
