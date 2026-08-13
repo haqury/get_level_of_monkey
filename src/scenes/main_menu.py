@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import Path
 from direct.gui.DirectGui import DirectButton, DirectLabel, DirectFrame, DirectEntry
+from direct.gui import DirectGuiGlobals as DGG
 from tkinter import filedialog
 import tkinter as tk
 from direct.gui.OnscreenText import OnscreenText
@@ -152,7 +153,7 @@ class MainMenuScene(BaseScene):
         if font:
             self._apply_font_to_button(self.play_btn, font)
 
-        # Player name (click to edit)
+        # Player name input
         player_name = (self.base.game_config.get("player", {}).get("name") or "Player") if hasattr(self.base, 'game_config') else "Player"
         # Выбор игрока — на 1/6 экрана выше (z: -0.2 + 1/6*2 ≈ 0.13)
         self.player_name_label = DirectLabel(
@@ -164,20 +165,21 @@ class MainMenuScene(BaseScene):
             text_font=font,
             text_align=TextNode.ALeft
         )
-        self.player_name_btn = DirectButton(
-            text=(player_name[:20] if player_name else "Player"),
-            text_scale=0.032,
-            text_fg=(1, 1, 1, 1),
-            frameColor=(0.3, 0.35, 0.45, 1),
-            frameSize=(-0.22, 0.22, -0.06, 0.06),
+        self.player_name_entry = DirectEntry(
+            scale=0.032,
+            initialText=(player_name[:30] if player_name else "Player"),
+            numLines=1,
+            width=14,
             pos=(0.05, 0, 0.13),
-            command=self._on_player_name_clicked,
-            text_font=font,
-            relief=2,
-            borderWidth=(0.008, 0.008)
+            entryFont=DGG.getDefaultFont(),
+            frameColor=(0.3, 0.35, 0.45, 1),
+            borderWidth=(0.008, 0.008),
+            focus=0,
+            backgroundFocus=1,
+            cursorKeys=1,
+            command=self._apply_player_name_from_entry,
         )
-        if font:
-            self._apply_font_to_button(self.player_name_btn, font)
+        self.player_name_entry.enterText(player_name[:30] if player_name else "Player")
 
         # Settings button - touching Play button (Play bottom at -0.4, Config top at -0.4, center at -0.5)
         self.settings_btn = DirectButton(
@@ -253,8 +255,8 @@ class MainMenuScene(BaseScene):
         self.back_to_game_btn.hide()
         if hasattr(self, 'player_name_label'):
             self.player_name_label.hide()
-        if hasattr(self, 'player_name_btn'):
-            self.player_name_btn.hide()
+        if hasattr(self, 'player_name_entry'):
+            self.player_name_entry.hide()
         self.settings_btn.hide()
         self.quit_btn.hide()
         self.controls_text.hide()
@@ -273,8 +275,8 @@ class MainMenuScene(BaseScene):
         self._update_from_pause_buttons()
         if hasattr(self, 'player_name_label'):
             self.player_name_label.show()
-        if hasattr(self, 'player_name_btn'):
-            self.player_name_btn.show()
+        if hasattr(self, 'player_name_entry'):
+            self.player_name_entry.show()
         self.settings_btn.show()
         self.quit_btn.show()
         self.controls_text.show()
@@ -294,59 +296,16 @@ class MainMenuScene(BaseScene):
         if hasattr(self.base, "_return_from_settings_to_game"):
             self.base._return_from_settings_to_game()
 
-    def _on_player_name_clicked(self):
-        """Edit player name in-place: hide button, show DirectEntry."""
-        if getattr(self, "_player_name_edit", None):
+    def _apply_player_name_from_entry(self, *args, **kwargs):
+        """Save player name from main menu input field."""
+        if not hasattr(self, "player_name_entry"):
             return
-        current = (self.base.game_config.get("player", {}).get("name") or "Player") if hasattr(self.base, 'game_config') else "Player"
-        self.player_name_btn.hide()
-        font = getattr(self.base, 'cyrillic_font', None)
-        entry = DirectEntry(
-            scale=0.032,
-            initialText=str(current)[:30],
-            numLines=1,
-            width=18,
-            pos=(0.05, 0, 0.13),
-            text_font=font,
-            frameColor=(0.3, 0.35, 0.45, 1),
-            frameSize=(-0.22, 0.22, -0.06, 0.06),
-            relief=2,
-            borderWidth=(0.008, 0.008),
-            text_fg=(1, 1, 1, 1),
-            focus=1,
-            cursorKeys=1,
-            command=self._apply_player_name_edit,
-            focusOutCommand=self._apply_player_name_edit,
-        )
-        entry.setBin("fixed", 60)
-        self._player_name_edit = {"entry": entry, "btn": self.player_name_btn}
-        self.base.accept("escape", self._cancel_player_name_edit)
-
-    def _apply_player_name_edit(self, *args, **kwargs):
-        """Apply edited player name and show button again."""
-        edit = getattr(self, "_player_name_edit", None)
-        if not edit:
-            return
-        new_name = (edit["entry"].get() or "").strip()[:30] or "Player"
-        edit["entry"].destroy()
-        edit["btn"]["text"] = new_name[:20]
-        edit["btn"].show()
-        self._player_name_edit = None
-        self.base.ignore("escape")
+        new_name = (self.player_name_entry.get() or "").strip()[:30] or "Player"
+        self.player_name_entry.enterText(new_name)
         if hasattr(self.base, 'game_config'):
             self.base.game_config.setdefault("player", {})["name"] = new_name
             self._save_game_config()
         logger.info("Player name set: %s", new_name)
-
-    def _cancel_player_name_edit(self):
-        """Cancel player name edit (Escape)."""
-        edit = getattr(self, "_player_name_edit", None)
-        if not edit:
-            return
-        edit["entry"].destroy()
-        edit["btn"].show()
-        self._player_name_edit = None
-        self.base.ignore("escape")
     
     def enter(self, player=None):
         """Enter menu"""
@@ -731,12 +690,24 @@ class MainMenuScene(BaseScene):
             )
             self.brainlink_checkboxes[key] = checkbox
         
-        # Значения — кнопки с текстом; по клику открывается диалог tkinter (нормальное поле ввода)
-        _btn_color = (0.4, 0.4, 0.55, 1.0)
+        # Numeric settings — always-visible input fields
+        entry_font = DGG.getDefaultFont()
+        _entry_color = (0.28, 0.32, 0.45, 1)
 
-        def _row(label_text, z_pos, config_key, default_val, fmt=str, parse=lambda s: s, clamp=None):
+        def _float_fmt(x):
+            return f"{float(x):.2f}"
+
+        def _float_parse(s):
+            return float(s.strip().replace(",", "."))
+
+        def _make_field_command(key):
+            def _cmd(*_args):
+                self._brainlink_apply_single_field(key)
+            return _cmd
+
+        def _config_entry_row(label_text, z_pos, config_key, default_val, width=8):
             val = bl_config.get(config_key, default_val)
-            disp = fmt(val)
+            text = _float_fmt(val)
             DirectLabel(
                 text=label_text,
                 text_scale=0.032,
@@ -745,47 +716,62 @@ class MainMenuScene(BaseScene):
                 pos=(-0.4, 0, z_pos),
                 parent=self.brainlink_frame,
                 text_font=font,
-                text_align=TextNode.ALeft
-            )
-            btn = DirectButton(
-                text=disp,
-                text_scale=0.035,
-                text_fg=(1, 1, 1, 1),
-                frameColor=_btn_color,
-                frameSize=(0, 0.3, -0.035, 0.035),
-                pos=(0.08, 0, z_pos),
-                parent=self.brainlink_frame,
-                text_font=font,
-                relief=2,
-                borderWidth=(0.01, 0.01),
                 text_align=TextNode.ALeft,
-                command=self._brainlink_edit_value,
-                extraArgs=[config_key, default_val, fmt, parse, clamp, z_pos]
             )
-            return btn
+            entry = DirectEntry(
+                parent=self.brainlink_frame,
+                scale=0.04,
+                pos=(0.08, 0, z_pos),
+                width=width,
+                numLines=1,
+                initialText=text,
+                entryFont=entry_font,
+                frameColor=_entry_color,
+                borderWidth=(0.008, 0.008),
+                focus=0,
+                backgroundFocus=0,
+                cursorKeys=1,
+                command=_make_field_command(config_key),
+                focusInCommand=self._brainlink_entry_focus_in,
+                focusInExtraArgs=[config_key],
+                focusOutCommand=self._brainlink_entry_focus_out,
+                focusOutExtraArgs=[config_key],
+            )
+            entry.enterText(text)
+            return entry
 
-        # Confidence threshold
-        self.brainlink_threshold_btn = _row(
-            "Confidence threshold:", -0.26, "confidence_threshold", 0.5,
-            fmt=lambda x: f"{float(x):.2f}",
-            parse=lambda s: float(s.strip().replace(",", ".")),
-            clamp=(0.0, 1.0)
-        )
-        # Min confidence
-        self.brainlink_min_confidence_btn = _row(
-            "Min confidence (limited speed):", -0.32, "min_confidence", 0.25,
-            fmt=lambda x: f"{float(x):.2f}",
-            parse=lambda s: float(s.strip().replace(",", ".")),
-            clamp=(0.0, 1.0)
-        )
-        # Full confidence
-        self.brainlink_full_confidence_btn = _row(
-            "Full confidence (max speed):", -0.38, "full_confidence", 0.7,
-            fmt=lambda x: f"{float(x):.2f}",
-            parse=lambda s: float(s.strip().replace(",", ".")),
-            clamp=(0.0, 1.0)
-        )
-        # Weights
+        self._brainlink_cached_values = {
+            "confidence_threshold": _float_fmt(bl_config.get("confidence_threshold", 0.5)),
+            "min_confidence": _float_fmt(bl_config.get("min_confidence", 0.25)),
+            "full_confidence": _float_fmt(bl_config.get("full_confidence", 0.7)),
+        }
+        self._brainlink_active_field = None
+        self._brainlink_weights_active = False
+
+        self.brainlink_entries = {
+            "confidence_threshold": {
+                "entry": _config_entry_row("Confidence threshold:", -0.26, "confidence_threshold", 0.5),
+                "default": 0.5,
+                "parse": _float_parse,
+                "fmt": _float_fmt,
+                "clamp": (0.0, 1.0),
+            },
+            "min_confidence": {
+                "entry": _config_entry_row("Min confidence (limited speed):", -0.32, "min_confidence", 0.25),
+                "default": 0.25,
+                "parse": _float_parse,
+                "fmt": _float_fmt,
+                "clamp": (0.0, 1.0),
+            },
+            "full_confidence": {
+                "entry": _config_entry_row("Full confidence (max speed):", -0.38, "full_confidence", 0.7),
+                "default": 0.7,
+                "parse": _float_parse,
+                "fmt": _float_fmt,
+                "clamp": (0.0, 1.0),
+            },
+        }
+
         weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
         weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
 
@@ -797,31 +783,29 @@ class MainMenuScene(BaseScene):
             pos=(-0.4, 0, -0.44),
             parent=self.brainlink_frame,
             text_font=font,
-            text_align=TextNode.ALeft
-        )
-
-        def _parse_weights(s):
-            parts = [p.strip().replace(",", ".") for p in s.split(",")]
-            return [float(x) for x in parts[:4]]
-
-        def _fmt_weights(w):
-            return ", ".join(str(round(x, 2)) for x in (w + [1.0] * 4)[:4])
-
-        self.brainlink_weights_btn = DirectButton(
-            text=weights_str,
-            text_scale=0.032,
-            text_fg=(1, 1, 1, 1),
-            frameColor=_btn_color,
-            frameSize=(0, 0.48, -0.035, 0.035),
-            pos=(0.05, 0, -0.44),
-            parent=self.brainlink_frame,
-            text_font=font,
-            relief=2,
-            borderWidth=(0.01, 0.01),
             text_align=TextNode.ALeft,
-            command=self._brainlink_edit_weights,
-            extraArgs=[]
         )
+
+        self._brainlink_cached_weights = weights_str
+
+        self.brainlink_weights_entry = DirectEntry(
+            parent=self.brainlink_frame,
+            scale=0.038,
+            pos=(0.05, 0, -0.44),
+            width=20,
+            numLines=1,
+            initialText=weights_str,
+            entryFont=entry_font,
+            frameColor=_entry_color,
+            borderWidth=(0.008, 0.008),
+            focus=0,
+            backgroundFocus=0,
+            cursorKeys=1,
+            command=self._brainlink_apply_weights_field,
+            focusInCommand=self._brainlink_weights_focus_in,
+            focusOutCommand=self._brainlink_weights_focus_out,
+        )
+        self.brainlink_weights_entry.enterText(weights_str)
 
         DirectButton(
             text="Apply",
@@ -865,151 +849,167 @@ class MainMenuScene(BaseScene):
             borderWidth=(0.003, 0.003)
         )
     
-    def _brainlink_edit_value(self, config_key, default_val, fmt, parse, clamp, z_pos):
-        """Редактирование значения прямо в игре: скрыть кнопку, показать DirectEntry на том же месте."""
-        if not hasattr(self.base, 'game_config'):
-            return
-        if getattr(self, "_inline_edit", None):
-            return  # уже редактируем
-        bl_config = self.base.game_config.get("brainlink", {})
-        current = bl_config.get(config_key, default_val)
-        btn_map = {
-            "confidence_threshold": self.brainlink_threshold_btn,
-            "min_confidence": self.brainlink_min_confidence_btn,
-            "full_confidence": self.brainlink_full_confidence_btn,
-        }
-        btn = btn_map.get(config_key)
-        if not btn:
-            return
-        btn.hide()
-        _btn_color = (0.4, 0.4, 0.55, 1.0)
-        font = self.base.cyrillic_font if hasattr(self.base, 'cyrillic_font') and self.base.cyrillic_font else None
-        entry = DirectEntry(
-            scale=0.035,
-            initialText=fmt(current),
-            numLines=1,
-            width=12,
-            pos=(0.08, 0, z_pos),
-            parent=self.brainlink_frame,
-            text_font=font,
-            frameColor=_btn_color,
-            frameSize=(0, 0.3, -0.035, 0.035),
-            relief=2,
-            borderWidth=(0.01, 0.01),
-            text_fg=(1, 1, 1, 1),
-            focus=1,
-            cursorKeys=1,
-            command=self._apply_inline_edit,
-            focusOutCommand=self._apply_inline_edit,
-        )
-        entry.setBin("fixed", 60)
-        self._inline_edit = {
-            "entry": entry,
-            "btn": btn,
-            "config_key": config_key,
-            "default_val": default_val,
-            "fmt": fmt,
-            "parse": parse,
-            "clamp": clamp,
-            "weights": False,
-        }
-        self.base.accept("escape", self._cancel_inline_edit)
+    def _brainlink_entry_focus_in(self, key):
+        """Only one BrainLink field receives keyboard input at a time."""
+        self._brainlink_active_field = key
+        self._brainlink_weights_active = False
+        for k, meta in getattr(self, "brainlink_entries", {}).items():
+            if k != key:
+                meta["entry"]["focus"] = 0
 
-    def _brainlink_edit_weights(self):
-        """Редактирование весов прямо в игре: скрыть кнопку, показать DirectEntry на том же месте."""
-        if not hasattr(self.base, 'game_config'):
+    def _brainlink_entry_focus_out(self, key):
+        """Remember field text when focus leaves."""
+        meta = getattr(self, "brainlink_entries", {}).get(key)
+        if meta:
+            self._brainlink_cached_values[key] = meta["entry"].get(plain=True).strip()
+        if getattr(self, "_brainlink_active_field", None) == key:
+            self._brainlink_active_field = None
+
+    def _brainlink_weights_focus_in(self):
+        self._brainlink_weights_active = True
+        self._brainlink_active_field = None
+        for meta in getattr(self, "brainlink_entries", {}).values():
+            meta["entry"]["focus"] = 0
+
+    def _brainlink_weights_focus_out(self):
+        if hasattr(self, "brainlink_weights_entry"):
+            self._brainlink_cached_weights = self.brainlink_weights_entry.get(plain=True).strip()
+        self._brainlink_weights_active = False
+
+    def _brainlink_sync_active_field_to_cache(self):
+        """Copy currently focused field into cache before bulk apply."""
+        active = getattr(self, "_brainlink_active_field", None)
+        if active and active in getattr(self, "brainlink_entries", {}):
+            entry = self.brainlink_entries[active]["entry"]
+            self._brainlink_cached_values[active] = entry.get(plain=True).strip()
+        if getattr(self, "_brainlink_weights_active", False) and hasattr(self, "brainlink_weights_entry"):
+            self._brainlink_cached_weights = self.brainlink_weights_entry.get(plain=True).strip()
+
+    def _brainlink_apply_single_field(self, key):
+        """Apply one numeric BrainLink field (Enter in that input)."""
+        if not hasattr(self.base, "game_config") or key not in getattr(self, "brainlink_entries", {}):
             return
-        if getattr(self, "_inline_edit", None):
+        meta = self.brainlink_entries[key]
+        bl_config = self.base.game_config.get("brainlink", {})
+        text = meta["entry"].get(plain=True).strip() or self._brainlink_cached_values.get(key, "")
+        fallback = bl_config.get(key, meta["default"])
+        try:
+            val = meta["parse"](text)
+            if meta.get("clamp"):
+                lo, hi = meta["clamp"]
+                val = max(lo, min(hi, val))
+            formatted = meta["fmt"](val)
+            bl_config[key] = val
+            self.base.game_config["brainlink"] = bl_config
+            meta["entry"].enterText(formatted)
+            self._brainlink_cached_values[key] = formatted
+            self._save_brainlink_config()
+            logger.info("BrainLink config updated: %s = %s", key, val)
+        except (ValueError, TypeError) as e:
+            logger.warning("Invalid %s: %s", key, e)
+            restored = meta["fmt"](fallback)
+            meta["entry"].enterText(restored)
+            self._brainlink_cached_values[key] = restored
+
+    def _brainlink_apply_weights_field(self, *args, **kwargs):
+        """Apply weights field only (Enter in weights input)."""
+        if not hasattr(self.base, "game_config") or not hasattr(self, "brainlink_weights_entry"):
             return
         bl_config = self.base.game_config.get("brainlink", {})
+        fallback_weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
+        text = self.brainlink_weights_entry.get(plain=True).strip() or getattr(
+            self, "_brainlink_cached_weights", ""
+        )
+        try:
+            parts = [p.strip().replace(",", ".") for p in text.split(",")]
+            vals = [float(x) for x in parts[:4]]
+            if len(vals) < 4:
+                vals.extend([1.0] * (4 - len(vals)))
+            formatted = ", ".join(str(round(x, 2)) for x in vals[:4])
+            bl_config["prediction_weights"] = vals[:4]
+            self.base.game_config["brainlink"] = bl_config
+            self.brainlink_weights_entry.enterText(formatted)
+            self._brainlink_cached_weights = formatted
+            self._save_brainlink_config()
+            logger.info("BrainLink weights updated: %s", vals[:4])
+        except (ValueError, TypeError) as e:
+            logger.warning("Invalid weights: %s", e)
+            restored = ", ".join(str(round(w, 2)) for w in (fallback_weights + [1.0] * 4)[:4])
+            self.brainlink_weights_entry.enterText(restored)
+            self._brainlink_cached_weights = restored
+
+    def _refresh_brainlink_entries_from_config(self):
+        """Reload BrainLink input fields from current game config."""
+        if not hasattr(self, "brainlink_entries") or not hasattr(self.base, "game_config"):
+            return
+        bl_config = self.base.game_config.get("brainlink", {})
+        if not hasattr(self, "_brainlink_cached_values"):
+            self._brainlink_cached_values = {}
+        for key, meta in self.brainlink_entries.items():
+            val = bl_config.get(key, meta["default"])
+            formatted = meta["fmt"](val)
+            meta["entry"].enterText(formatted)
+            self._brainlink_cached_values[key] = formatted
         weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
-        current_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
-        self.brainlink_weights_btn.hide()
-        _btn_color = (0.4, 0.4, 0.55, 1.0)
-        font = self.base.cyrillic_font if hasattr(self.base, 'cyrillic_font') and self.base.cyrillic_font else None
-        entry = DirectEntry(
-            scale=0.032,
-            initialText=current_str,
-            numLines=1,
-            width=18,
-            pos=(0.05, 0, -0.44),
-            parent=self.brainlink_frame,
-            text_font=font,
-            frameColor=_btn_color,
-            frameSize=(0, 0.48, -0.035, 0.035),
-            relief=2,
-            borderWidth=(0.01, 0.01),
-            text_fg=(1, 1, 1, 1),
-            focus=1,
-            cursorKeys=1,
-            command=self._apply_inline_edit,
-            focusOutCommand=self._apply_inline_edit,
-        )
-        entry.setBin("fixed", 60)
-        self._inline_edit = {
-            "entry": entry,
-            "btn": self.brainlink_weights_btn,
-            "weights": True,
-        }
-        self.base.accept("escape", self._cancel_inline_edit)
+        weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
+        if hasattr(self, "brainlink_weights_entry"):
+            self.brainlink_weights_entry.enterText(weights_str)
+            self._brainlink_cached_weights = weights_str
 
-    def _apply_inline_edit(self, *args, **kwargs):
-        """Применить введённое значение (Enter или потеря фокуса), скрыть entry, показать кнопку."""
-        edit = getattr(self, "_inline_edit", None)
-        if not edit:
+    def _brainlink_apply_ml_config(self, *args, **kwargs):
+        """Read all BrainLink input fields from cache, validate, save."""
+        if not hasattr(self.base, 'game_config'):
             return
-        entry = edit["entry"]
-        btn = edit["btn"]
-        new_str = entry.get().strip()
-        entry.destroy()
-        btn.show()
-        self._inline_edit = None
-        self.base.ignore("escape")
-        if not new_str:
-            return
-        if edit.get("weights"):
+        self._brainlink_sync_active_field_to_cache()
+        bl_config = self.base.game_config.get("brainlink", {})
+        ok = True
+
+        for key, meta in getattr(self, "brainlink_entries", {}).items():
+            text = self._brainlink_cached_values.get(key, "").strip()
+            fallback = bl_config.get(key, meta["default"])
+            if not text:
+                text = meta["fmt"](fallback)
             try:
-                parts = [p.strip().replace(",", ".") for p in new_str.split(",")]
+                val = meta["parse"](text)
+                if meta.get("clamp"):
+                    lo, hi = meta["clamp"]
+                    val = max(lo, min(hi, val))
+                formatted = meta["fmt"](val)
+                bl_config[key] = val
+                meta["entry"].enterText(formatted)
+                self._brainlink_cached_values[key] = formatted
+            except (ValueError, TypeError) as e:
+                logger.warning("Invalid %s: %s", key, e)
+                restored = meta["fmt"](fallback)
+                meta["entry"].enterText(restored)
+                self._brainlink_cached_values[key] = restored
+                ok = False
+
+        if hasattr(self, "brainlink_weights_entry"):
+            text = getattr(self, "_brainlink_cached_weights", "").strip()
+            fallback_weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
+            if not text:
+                text = ", ".join(str(round(w, 2)) for w in (fallback_weights + [1.0] * 4)[:4])
+            try:
+                parts = [p.strip().replace(",", ".") for p in text.split(",")]
                 vals = [float(x) for x in parts[:4]]
                 if len(vals) < 4:
                     vals.extend([1.0] * (4 - len(vals)))
-                bl_config = self.base.game_config.get("brainlink", {})
+                formatted = ", ".join(str(round(x, 2)) for x in vals[:4])
                 bl_config["prediction_weights"] = vals[:4]
-                self.base.game_config["brainlink"] = bl_config
-                btn["text"] = ", ".join(str(round(x, 2)) for x in vals[:4])
-                self._save_brainlink_config()
-                logger.info("BrainLink weights updated: %s", vals[:4])
+                self.brainlink_weights_entry.enterText(formatted)
+                self._brainlink_cached_weights = formatted
             except (ValueError, TypeError) as e:
                 logger.warning("Invalid weights: %s", e)
-        else:
-            try:
-                val = edit["parse"](new_str)
-                if edit.get("clamp"):
-                    a, b = edit["clamp"]
-                    val = max(a, min(b, val))
-                bl_config = self.base.game_config.get("brainlink", {})
-                bl_config[edit["config_key"]] = val
-                self.base.game_config["brainlink"] = bl_config
-                btn["text"] = edit["fmt"](val)
-                self._save_brainlink_config()
-                logger.info("BrainLink config updated: %s = %s", edit["config_key"], val)
-            except (ValueError, TypeError) as e:
-                logger.warning("Invalid value: %s", e)
+                restored = ", ".join(str(round(w, 2)) for w in (fallback_weights + [1.0] * 4)[:4])
+                self.brainlink_weights_entry.enterText(restored)
+                self._brainlink_cached_weights = restored
+                ok = False
 
-    def _cancel_inline_edit(self):
-        """Отменить редактирование (Escape): скрыть entry, показать кнопку."""
-        edit = getattr(self, "_inline_edit", None)
-        if not edit:
-            return
-        edit["entry"].destroy()
-        edit["btn"].show()
-        self._inline_edit = None
-        self.base.ignore("escape")
-
-    def _brainlink_apply_ml_config(self, *args, **kwargs):
-        """Сохранить конфиг BrainLink в файл (значения уже в config после редактирования)."""
+        self.base.game_config["brainlink"] = bl_config
         self._save_brainlink_config()
-        logger.info("BrainLink config saved")
+        if ok:
+            logger.info("BrainLink ML config applied")
     
     def _brainlink_load_model(self):
         """Open file dialog to choose model file; save path to config."""
@@ -1087,6 +1087,7 @@ class MainMenuScene(BaseScene):
         elif tab_id == "brainlink":
             self.brainlink_frame.show()
             self.settings_tabs["brainlink"]['frameColor'] = (0.3, 0.3, 0.5, 1)
+            self._refresh_brainlink_entries_from_config()
     
     def _toggle_brainlink_setting(self, key: str):
         """Toggle BrainLink setting and save to config"""
@@ -1181,6 +1182,7 @@ class MainMenuScene(BaseScene):
         """Toggle settings panel visibility"""
         if self.settings_frame.isHidden():
             self.settings_frame.show()
+            self._refresh_brainlink_entries_from_config()
             # Hide main menu buttons when settings are open to prevent overlap
             self.play_btn.hide()
             self.back_to_game_btn.hide()
@@ -1188,6 +1190,7 @@ class MainMenuScene(BaseScene):
             self.quit_btn.hide()
             self.controls_text.hide()
         else:
+            self._brainlink_apply_ml_config()
             self.settings_frame.hide()
             # If we came from pause, return to game; else show main menu buttons
             if getattr(self.base, "_from_pause_settings", False):

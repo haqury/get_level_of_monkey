@@ -5,12 +5,30 @@ Fucking Pickup - Main Entry Point
 2D Action game with BrainLink integration!
 """
 
+import os
 import sys
 import logging
 from pathlib import Path
 
+
+def _get_base_dir() -> Path:
+    """Project root in dev mode, exe folder when frozen."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _setup_runtime_paths() -> Path:
+    """Ensure relative asset/config paths work when launched as .exe."""
+    base_dir = _get_base_dir()
+    os.chdir(base_dir)
+    return base_dir
+
+
+BASE_DIR = _setup_runtime_paths()
+
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(BASE_DIR))
 
 # Setup logging
 import io
@@ -42,7 +60,7 @@ stream_handler = UTF8StreamHandler()
 stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 # File handler with UTF-8 encoding
-file_handler = logging.FileHandler('game.log', mode='w', encoding='utf-8')
+file_handler = logging.FileHandler(BASE_DIR / 'game.log', mode='w', encoding='utf-8')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 logging.basicConfig(

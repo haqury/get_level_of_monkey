@@ -13,7 +13,7 @@
     "energy_regen_rate": 5.0,
     "move_cost": 100,
     "move_speed": 5,
-    "cheater_mode": false
+    "cheater_mode": true
   },
   "brainlink": {
     "enabled": true,
@@ -24,8 +24,8 @@
     "send_to_ml": true,
     "send_brainlink_events": true,
     "confidence_threshold": 0.5,
-    "min_confidence": 0.25,
-    "full_confidence": 0.7,
+    "min_confidence": 0.2,
+    "full_confidence": 0.8,
     "prediction_weights": [
       1.0,
       1.0,
