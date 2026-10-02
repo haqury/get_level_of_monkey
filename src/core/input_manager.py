@@ -37,6 +37,7 @@ class InputManager(DirectObject):
         self._current_movement_event = ""
         self._movement_source = MOVEMENT_SOURCE_NONE
         self._current_keyboard_event = ""
+        self._keyboard_event_recordable = False
         self._is_using_brainlink = False
         self._current_ml_event = ""
         self.last_keyboard_event = ""
@@ -75,7 +76,7 @@ class InputManager(DirectObject):
         self.keyboard.on_sit_pause = value
 
     def update(self, dt: float):
-        (kb_dir, kb_event) = self.keyboard.get_movement_and_event()
+        (kb_dir, kb_event, kb_recordable) = self.keyboard.get_movement_and_event()
         bl_event, bl_dir = self.brainlink_input.update()
         self._current_ml_event = bl_event or ""
 
@@ -85,7 +86,8 @@ class InputManager(DirectObject):
             movement_from_brainlink_this_frame = False
             self._current_movement_event = kb_event
             self._movement_source = MOVEMENT_SOURCE_KEYBOARD
-            self._current_keyboard_event = kb_event
+            self._current_keyboard_event = kb_event if kb_recordable else ""
+            self._keyboard_event_recordable = kb_recordable
             self._is_using_brainlink = False
         elif bl_event:
             x, y = bl_dir
@@ -93,6 +95,7 @@ class InputManager(DirectObject):
             self._current_movement_event = bl_event
             self._movement_source = MOVEMENT_SOURCE_BRAINLINK
             self._current_keyboard_event = ""
+            self._keyboard_event_recordable = False
             self._is_using_brainlink = bool(bl_event != "stop")
         else:
             x, y = 0.0, 0.0
@@ -100,12 +103,14 @@ class InputManager(DirectObject):
             self._current_movement_event = ""
             self._movement_source = MOVEMENT_SOURCE_NONE
             self._current_keyboard_event = ""
+            self._keyboard_event_recordable = False
             self._is_using_brainlink = False
 
         # Отправка в BrainLink только при действии с клавиатуры (не предсказание)
         if (
             self.send_keyboard_events
             and kb_event
+            and kb_recordable
             and kb_event != self.last_keyboard_event
             and not movement_from_brainlink_this_frame
             and self.brainlink
@@ -153,6 +158,12 @@ class InputManager(DirectObject):
 
     def get_current_keyboard_event(self) -> str:
         return getattr(self, '_current_keyboard_event', "")
+
+    def is_keyboard_event_recordable(self) -> bool:
+        return getattr(self, "_keyboard_event_recordable", False)
+
+    def is_action_pressed_recordable(self) -> bool:
+        return self.keyboard.is_action_pressed_recordable()
 
     def get_movement_source(self) -> str:
         return getattr(self, '_movement_source', MOVEMENT_SOURCE_NONE)

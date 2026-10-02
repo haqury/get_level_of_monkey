@@ -591,57 +591,75 @@ class MainMenuScene(BaseScene):
         """Create controls settings tab with cheater mode and keyboard rebind"""
         self.controls_frame = DirectFrame(
             frameColor=(0, 0, 0, 0),
-            frameSize=(-0.55, 0.55, -0.52, 0.25),
-            pos=(0, 0, 0.05),
+            frameSize=(-0.55, 0.55, -0.58, 0.32),
+            pos=(0, 0, 0.02),
             parent=self.settings_frame
         )
         
-        # Get current cheater mode setting
         cheater_mode = False
         if hasattr(self.base, 'game_config'):
             cheater_mode = self.base.game_config.get("player", {}).get("cheater_mode", False)
         
-        # Cheater Mode checkbox
         self.cheater_mode_label = DirectLabel(
             text=t("settings.cheater_mode"),
-            text_scale=0.04,
+            text_scale=0.034,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
-            pos=(-0.4, 0, 0.1),
+            pos=(-0.45, 0, 0.26),
             parent=self.controls_frame,
             text_font=font,
             text_align=TextNode.ALeft
         )
-        
         self.cheater_mode_hint = DirectLabel(
             text=t("settings.cheater_hint"),
-            text_scale=0.03,
+            text_scale=0.026,
             text_fg=(0.7, 0.7, 0.7, 1),
             frameColor=(0, 0, 0, 0),
-            pos=(-0.4, 0, 0.0),
+            pos=(-0.45, 0, 0.20),
             parent=self.controls_frame,
             text_font=font,
             text_align=TextNode.ALeft
         )
-        
-        # Cheater mode checkbox button
         self.cheater_mode_checkbox = DirectButton(
-            text="✓" if cheater_mode else " ",
-            text_scale=0.04,
-            text_fg=(0, 1, 0, 1) if cheater_mode else (0.5, 0.5, 0.5, 1),
-            frameColor=(0.2, 0.2, 0.3, 1),
-            frameSize=(-0.05, 0.05, -0.04, 0.04),
-            pos=(0.35, 0, 0.05),
+            text="+" if cheater_mode else "",
+            text_scale=0.05,
+            text_fg=(0.9, 1, 0.9, 1) if cheater_mode else (0.5, 0.5, 0.5, 1),
+            frameColor=(0.15, 0.4, 0.2, 1) if cheater_mode else (0.22, 0.22, 0.28, 1),
+            frameSize=(-0.055, 0.055, -0.045, 0.045),
+            pos=(0.42, 0, 0.23),
             command=self._toggle_cheater_mode,
             parent=self.controls_frame,
             text_font=font,
-            relief=1,
-            borderWidth=(0.003, 0.003)
+            relief=2,
+            borderWidth=(0.008, 0.008),
         )
         
-        # Keyboard layout: movement + sit + sit+pause
+        DirectLabel(
+            text=t("settings.keys_col_brainlink"),
+            text_scale=0.026,
+            text_fg=(0.75, 0.85, 1.0, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(0.12, 0, 0.11),
+            parent=self.controls_frame,
+            text_font=font,
+            text_align=TextNode.ACenter,
+        )
+        DirectLabel(
+            text=t("settings.keys_col_local"),
+            text_scale=0.026,
+            text_fg=(0.75, 1.0, 0.85, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(0.42, 0, 0.11),
+            parent=self.controls_frame,
+            text_font=font,
+            text_align=TextNode.ACenter,
+        )
+
         default_keys = {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}
-        controls_cfg = self.base.game_config.get("controls", {}).get("keyboard", default_keys) if hasattr(self.base, "game_config") else default_keys
+        default_local = {a: "" for a in default_keys}
+        controls_root = self.base.game_config.get("controls", {}) if hasattr(self.base, "game_config") else {}
+        controls_cfg = controls_root.get("keyboard", default_keys)
+        controls_local_cfg = controls_root.get("keyboard_local", default_local)
         key_labels = [
             ("settings.key_up", "up"),
             ("settings.key_down", "down"),
@@ -651,12 +669,15 @@ class MainMenuScene(BaseScene):
             ("settings.key_sit_pause", "sit_pause"),
         ]
         self.controls_key_buttons = {}
+        self.controls_key_buttons_local = {}
         self.controls_action_labels = {}
+        row_step = 0.062
+        keys_top_z = 0.04
         for i, (label_key, action) in enumerate(key_labels):
-            z = 0.05 - (i + 1) * 0.08
+            z = keys_top_z - i * row_step
             lbl = DirectLabel(
                 text=t(label_key) + ":",
-                text_scale=0.032,
+                text_scale=0.028,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0, 0, 0, 0),
                 pos=(-0.45, 0, z),
@@ -668,19 +689,35 @@ class MainMenuScene(BaseScene):
             key_name = controls_cfg.get(action, default_keys.get(action, "?"))
             btn = DirectButton(
                 text=self._key_display_name(key_name),
-                text_scale=0.028,
+                text_scale=0.026,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0.25, 0.25, 0.4, 1),
-                frameSize=(-0.2, 0.2, -0.035, 0.035),
-                pos=(0.15, 0, z),
+                frameSize=(-0.14, 0.14, -0.032, 0.032),
+                pos=(0.12, 0, z),
                 command=self._start_rebind_key,
-                extraArgs=[action],
+                extraArgs=[action, "keyboard"],
                 parent=self.controls_frame,
                 text_font=font,
                 relief=1,
                 borderWidth=(0.004, 0.004)
             )
             self.controls_key_buttons[action] = btn
+            local_key = controls_local_cfg.get(action, "")
+            btn_local = DirectButton(
+                text=self._key_display_name(local_key),
+                text_scale=0.026,
+                text_fg=(1, 1, 1, 1),
+                frameColor=(0.2, 0.35, 0.3, 1),
+                frameSize=(-0.14, 0.14, -0.032, 0.032),
+                pos=(0.42, 0, z),
+                command=self._start_rebind_key,
+                extraArgs=[action, "keyboard_local"],
+                parent=self.controls_frame,
+                text_font=font,
+                relief=1,
+                borderWidth=(0.004, 0.004)
+            )
+            self.controls_key_buttons_local[action] = btn_local
         
         current_locale = getattr(self.base, "game_config", {}).get("locale", get_locale())
         self.language_label = DirectLabel(
@@ -725,6 +762,7 @@ class MainMenuScene(BaseScene):
         )
         
         self._rebind_action = None
+        self._rebind_column = "keyboard"
         self.REBIND_KEYS = [
             "arrow_up", "arrow_down", "arrow_left", "arrow_right",
             "space", "w", "a", "s", "d", "p", "r", "t", "f", "g", "e", "q", "z", "x", "c", "v", "b", "n", "m",
@@ -735,16 +773,17 @@ class MainMenuScene(BaseScene):
     def _key_display_name(self, key_name: str) -> str:
         """Human-readable key name for display."""
         if not key_name:
-            return "?"
+            return t("settings.key_unbound")
         s = key_name.replace("arrow_", "").replace("-", " ").strip()
         return s[:1].upper() + s[1:] if s else key_name
     
-    def _start_rebind_key(self, action: str):
+    def _start_rebind_key(self, action: str, column: str = "keyboard"):
         """Start listening for next key press to rebind."""
         if self._rebind_action:
             return
         self._rebind_action = action
-        btn = self.controls_key_buttons.get(action)
+        self._rebind_column = column
+        btn = self.controls_key_buttons.get(action) if column == "keyboard" else self.controls_key_buttons_local.get(action)
         if btn:
             btn["text"] = t("settings.rebind_wait")
         for key in self.REBIND_KEYS:
@@ -755,16 +794,20 @@ class MainMenuScene(BaseScene):
         if not self._rebind_action:
             return
         action = self._rebind_action
+        column = self._rebind_column or "keyboard"
         self._rebind_action = None
+        self._rebind_column = "keyboard"
         for key in self.REBIND_KEYS:
             self.base.ignore(key)
         
         if not hasattr(self.base, "game_config"):
             return
+        if key_name == "backspace":
+            key_name = ""
         ctrl = self.base.game_config.get("controls", {})
-        kbd = ctrl.get("keyboard", {})
+        kbd = ctrl.get(column, {})
         kbd[action] = key_name
-        ctrl["keyboard"] = kbd
+        ctrl[column] = kbd
         self.base.game_config["controls"] = ctrl
         
         try:
@@ -772,7 +815,8 @@ class MainMenuScene(BaseScene):
             if config_path.exists():
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                config.setdefault("controls", {})["keyboard"] = kbd
+                controls = config.setdefault("controls", {})
+                controls[column] = kbd
                 with open(config_path, "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=2)
         except Exception as e:
@@ -781,10 +825,10 @@ class MainMenuScene(BaseScene):
         if hasattr(self.base, "input_manager") and self.base.input_manager:
             self.base.input_manager.rebind_keys()
         
-        btn = self.controls_key_buttons.get(action)
+        btn = self.controls_key_buttons.get(action) if column == "keyboard" else self.controls_key_buttons_local.get(action)
         if btn:
             btn["text"] = self._key_display_name(key_name)
-        logger.info("Key bound: %s -> %s", action, key_name)
+        logger.info("Key bound (%s): %s -> %s", column, action, key_name or "(none)")
     
     def _create_brainlink_tab(self, font):
         """Create BrainLink settings tab"""
@@ -1277,6 +1321,14 @@ class MainMenuScene(BaseScene):
         
         logger.info(f"BrainLink setting '{key}' changed to {new_value}")
     
+    def _set_cheater_checkbox_visual(self, enabled: bool):
+        cb = getattr(self, "cheater_mode_checkbox", None)
+        if not cb:
+            return
+        cb["text"] = "+" if enabled else ""
+        cb["text_fg"] = (0.9, 1, 0.9, 1) if enabled else (0.5, 0.5, 0.5, 1)
+        cb["frameColor"] = (0.15, 0.4, 0.2, 1) if enabled else (0.22, 0.22, 0.28, 1)
+
     def _toggle_cheater_mode(self):
         """Toggle cheater mode (unlimited energy)"""
         if not hasattr(self.base, 'game_config'):
@@ -1286,13 +1338,10 @@ class MainMenuScene(BaseScene):
         current_value = player_config.get("cheater_mode", False)
         new_value = not current_value
         
-        # Update config
         player_config["cheater_mode"] = new_value
         self.base.game_config["player"] = player_config
         
-        # Update checkbox display
-        self.cheater_mode_checkbox['text'] = "✓" if new_value else " "
-        self.cheater_mode_checkbox['text_fg'] = (0, 1, 0, 1) if new_value else (0.5, 0.5, 0.5, 1)
+        self._set_cheater_checkbox_visual(new_value)
         
         # Update energy system if it exists
         if hasattr(self.base, 'energy_system'):
@@ -1404,12 +1453,20 @@ class MainMenuScene(BaseScene):
             self.settings_frame.show()
             self._refresh_brainlink_entries_from_config()
             self._refresh_resolution_ui()
-            # Hide main menu buttons when settings are open to prevent overlap
+            # Hide main menu UI when settings are open to prevent overlap
             self.play_btn.hide()
             self.back_to_game_btn.hide()
             self.settings_btn.hide()
             self.quit_btn.hide()
             self.controls_text.hide()
+            if hasattr(self, "player_name_label"):
+                self.player_name_label.hide()
+            if hasattr(self, "player_name_entry"):
+                self.player_name_entry.hide()
+            if hasattr(self, "status_frame"):
+                self.status_frame.hide()
+            self.title.hide()
+            self.subtitle.hide()
         else:
             self._brainlink_apply_ml_config()
             self.settings_frame.hide()
@@ -1422,6 +1479,14 @@ class MainMenuScene(BaseScene):
             self.settings_btn.show()
             self.quit_btn.show()
             self.controls_text.show()
+            if hasattr(self, "player_name_label"):
+                self.player_name_label.show()
+            if hasattr(self, "player_name_entry"):
+                self.player_name_entry.show()
+            if hasattr(self, "status_frame"):
+                self.status_frame.show()
+            self.title.show()
+            self.subtitle.show()
 
     def _apply_resolution(self, width: int, height: int, fullscreen: bool):
         """Apply resolution via Game.apply_resolution"""

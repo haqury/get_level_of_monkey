@@ -158,7 +158,10 @@ class Game(ShowBase):
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
             "player": {"name": "Player", "initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
             "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "min_confidence": 0.25, "full_confidence": 0.7, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": ""},
-            "controls": {"keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"}},
+            "controls": {
+                "keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"},
+                "keyboard_local": {"up": "", "down": "", "left": "", "right": "", "action": "", "sit_pause": ""},
+            },
             "locale": "en",
         }
     
@@ -731,6 +734,7 @@ class Game(ShowBase):
         
         # Sitting: hold Space = sit, 2x energy regen, send "stop" to BrainLink
         sitting = self.in_game and not self.dialog_box.is_visible and self.input_manager.is_action_pressed()
+        sitting_recordable = sitting and self.input_manager.is_action_pressed_recordable()
         self.player.is_sitting = sitting
         # Visual: squat when sitting
         if sitting:
@@ -741,7 +745,7 @@ class Game(ShowBase):
         self.energy_system.update(dt, regen_multiplier=regen_mult)
         
         # While sitting (Space held), send "stop" to BrainLink — one command per throttle (Type 2 = ML+history, else Type 1 = history)
-        if sitting and self.input_manager.brainlink and self.input_manager.brainlink.is_connected():
+        if sitting_recordable and self.input_manager.brainlink and self.input_manager.brainlink.is_connected():
             send_events = getattr(self.input_manager, 'send_brainlink_events', True) or getattr(self.input_manager, 'send_to_history', True) or getattr(self.input_manager, 'send_to_ml', False)
             if send_events:
                 import time
