@@ -4,6 +4,7 @@ import logging
 from direct.gui.DirectGui import DirectFrame, DirectLabel
 from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TextNode, TransparencyAttrib
+from src.core.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,9 @@ class HUD:
             base: ShowBase instance
         """
         self.base = base
+        self._last_level = 1
+        self._last_survival = 0.0
+        self._last_ml = {"prediction": "", "connected": False, "confidence": 0.0, "probs": None}
         
         # Use aspect2d for HUD elements (screen-space coordinates)
         # This ensures HUD scales properly in fullscreen
@@ -44,7 +48,7 @@ class HUD:
         )
         
         self.hp_label = DirectLabel(
-            text="HP:",
+            text=t("hud.hp"),
             text_scale=0.06,
             text_fg=(1, 0.2, 0.2, 1),
             text_align=TextNode.ALeft,
@@ -85,7 +89,7 @@ class HUD:
         )
         
         self.energy_label = DirectLabel(
-            text="Energy:",
+            text=t("hud.energy"),
             text_scale=0.05,
             text_fg=(0.3, 0.8, 1.0, 1),
             text_align=TextNode.ALeft,
@@ -132,7 +136,7 @@ class HUD:
         )
         
         self.level_label = DirectLabel(
-            text="Level: 1",
+            text=t("hud.level", level=1),
             text_scale=0.05,
             text_fg=(1, 1, 0, 1),
             text_align=TextNode.ALeft,
@@ -151,7 +155,7 @@ class HUD:
         )
         
         self.survival_label = DirectLabel(
-            text="Time: 0.0s",
+            text=t("hud.time", seconds=0.0),
             text_scale=0.05,
             text_fg=(0, 1, 0, 1),
             text_align=TextNode.ALeft,
@@ -173,7 +177,7 @@ class HUD:
         )
         
         self.ml_pred_label = DirectLabel(
-            text="ML: —",
+            text=t("hud.ml", value="—"),
             text_scale=0.045,
             text_fg=(0.9, 0.7, 1.0, 1),
             text_align=TextNode.ALeft,
@@ -203,7 +207,7 @@ class HUD:
         )
         
         self.ml_conn_label = DirectLabel(
-            text="BrainLink: off",
+            text=t("hud.brainlink_off"),
             text_scale=0.036,
             text_fg=(0.6, 0.6, 0.6, 1),
             text_align=TextNode.ALeft,
@@ -214,13 +218,20 @@ class HUD:
     
     def update_ml_display(self, prediction: str, connected: bool, confidence: float = 0.0, probs: dict = None):
         """Update ML stats (prediction, confidence, per-class probs, connection)."""
+        self._last_ml = {
+            "prediction": prediction,
+            "connected": connected,
+            "confidence": confidence,
+            "probs": probs,
+        }
         pred_str = prediction if prediction else "—"
-        self.ml_pred_label["text"] = f"ML: {pred_str}"
+        self.ml_pred_label["text"] = t("hud.ml", value=pred_str)
         if confidence > 0:
-            self.ml_conf_label["text"] = f"pred: {pred_str}  conf: {int(round(confidence * 100))}%"
+            conf_pct = f"{int(round(confidence * 100))}%"
+            self.ml_conf_label["text"] = t("hud.pred_conf", pred=pred_str, conf=conf_pct)
             self.ml_conf_label["text_fg"] = (0.3, 1.0, 0.5, 1) if confidence >= 0.5 else (1.0, 0.8, 0.2, 1)
         else:
-            self.ml_conf_label["text"] = f"pred: {pred_str}  conf: —"
+            self.ml_conf_label["text"] = t("hud.pred_conf_dash", pred=pred_str)
             self.ml_conf_label["text_fg"] = (0.7, 0.7, 0.8, 1)
         probs = probs or {}
         parts = []
@@ -228,8 +239,16 @@ class HUD:
             p = probs.get(k, 0)
             parts.append(f"{k}:{int(round(p * 100))}")
         self.ml_probs_label["text"] = " ".join(parts) if parts else "ml:— mr:— mu:— md:—"
-        self.ml_conn_label["text"] = "BrainLink: connected" if connected else "BrainLink: off"
+        self.ml_conn_label["text"] = t("hud.brainlink_connected") if connected else t("hud.brainlink_off")
         self.ml_conn_label["text_fg"] = (0.3, 1.0, 0.5, 1) if connected else (0.6, 0.6, 0.6, 1)
+    
+    def refresh_locale(self):
+        self.hp_label["text"] = t("hud.hp")
+        self.energy_label["text"] = t("hud.energy")
+        self.update_level(self._last_level)
+        self.update_survival_time(self._last_survival)
+        ml = self._last_ml
+        self.update_ml_display(ml["prediction"], ml["connected"], ml["confidence"], ml["probs"])
     
     def update_hp(self, current: int, maximum: int):
         """Update HP display"""
@@ -277,11 +296,13 @@ class HUD:
     
     def update_level(self, level: int):
         """Update level display"""
-        self.level_label['text'] = f"Level: {level}"
+        self._last_level = level
+        self.level_label['text'] = t("hud.level", level=level)
     
     def update_survival_time(self, seconds: float):
         """Update survival time display"""
-        self.survival_label['text'] = f"Time: {seconds:.1f}s"
+        self._last_survival = seconds
+        self.survival_label['text'] = t("hud.time", seconds=seconds)
     
     def show_survival_time(self):
         """Show survival time display"""

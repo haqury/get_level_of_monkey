@@ -1,0 +1,2 @@
+panda3d~=1.10.13
+dataclasses-json>=0.6.0

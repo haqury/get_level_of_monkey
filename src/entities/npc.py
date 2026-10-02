@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from direct.showbase.DirectObject import DirectObject
 from panda3d.core import CardMaker, Vec3
+from src.core.i18n import t, resolve_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -73,21 +74,21 @@ class NPC(DirectObject):
         
         return node
     
-    def add_dialog(self, text: str, options: list = None):
-        """
-        Add dialog
-        
-        Args:
-            text: Dialog text
-            options: List of dialog options [(text, callback), ...]
-        """
-        self.dialogs.append({"text": text, "options": options})
+    def add_dialog(self, text_key: str, options: list = None):
+        """Add dialog by i18n key."""
+        self.dialogs.append({"text_key": text_key, "options": options})
     
     def get_current_dialog(self):
-        """Get current dialog"""
+        """Get current dialog with translated text."""
         if 0 <= self.current_dialog_index < len(self.dialogs):
-            return self.dialogs[self.current_dialog_index]
+            entry = self.dialogs[self.current_dialog_index]
+            return resolve_dialog({"text_key": entry["text_key"], "options": entry.get("options")})
         return None
+    
+    def refresh_locale(self):
+        """Update display name after language change."""
+        if getattr(self, "_name_key", None):
+            self.name = t(self._name_key)
     
     def next_dialog(self):
         """Move to next dialog"""
@@ -119,6 +120,8 @@ class Father(NPC):
     
     def __init__(self, base, pos: tuple):
         super().__init__(base, "Father", pos, color=(0.8, 0.4, 0.2))
+        self._name_key = "npc.father.name"
+        self.name = t(self._name_key)
         
         # Set sprite path
         self.sprite_path = "father.png"
@@ -132,15 +135,14 @@ class Father(NPC):
         
         # Setup dialogs
         # Dialog when talking to father directly
-        self.add_dialog("Hello, son! You can't go out alone!")
-        self.add_dialog("Want to play a game? There are monkeys...")
+        self.add_dialog("npc.father.dialog1")
+        self.add_dialog("npc.father.dialog2")
         
-        # Special dialog when trying to exit (will be triggered by scene)
         self.exit_dialog = {
-            "text": "You can't go out alone! Let's play a game instead - there are monkeys outside!",
-            "options": [
-                ("Play Minigame", lambda: None)  # Callback will be set by scene
-            ]
+            "text_key": "npc.father.exit",
+            "option_keys": [
+                ("npc.father.play_minigame", lambda: None),
+            ],
         }
 
 
@@ -149,6 +151,8 @@ class Mother(NPC):
     
     def __init__(self, base, pos: tuple):
         super().__init__(base, "Mother", pos, color=(1.0, 0.6, 0.8))
+        self._name_key = "npc.mother.name"
+        self.name = t(self._name_key)
         
         # Set sprite path
         self.sprite_path = "mother.png"
@@ -163,8 +167,8 @@ class Mother(NPC):
         self.node.setPos(self.position)
         
         # Setup dialogs
-        self.add_dialog("Hello, little one! Have you eaten yet?")
-        self.add_dialog("Be careful with the monkeys!")
+        self.add_dialog("npc.mother.dialog1")
+        self.add_dialog("npc.mother.dialog2")
     
     def update_cooking_animation(self, dt: float):
         """Update cooking animation"""

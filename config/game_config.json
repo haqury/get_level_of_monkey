@@ -24,8 +24,8 @@
     "send_to_ml": true,
     "send_brainlink_events": true,
     "confidence_threshold": 0.5,
-    "min_confidence": 0.25,
-    "full_confidence": 0.7,
+    "min_confidence": 0.2,
+    "full_confidence": 0.8,
     "prediction_weights": [
       1.0,
       1.0,
@@ -43,5 +43,6 @@
       "action": "space",
       "sit_pause": "p"
     }
-  }
+  },
+  "locale": "ru"
 }

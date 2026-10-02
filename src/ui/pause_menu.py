@@ -3,6 +3,7 @@
 import logging
 from direct.gui.DirectGui import DirectFrame, DirectButton, DirectLabel
 from panda3d.core import TextNode
+from src.core.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,8 @@ class PauseMenu:
         self.is_visible = False
         self.frame = None
         self.buttons = []
+        self._button_keys = []
+        self.title_label = None
         self._create_ui()
 
     def _create_ui(self):
@@ -30,8 +33,8 @@ class PauseMenu:
         )
         self.frame.setBin("fixed", 100)
 
-        title = DirectLabel(
-            text="Menu",
+        self.title_label = DirectLabel(
+            text=t("pause.title"),
             text_scale=0.08,
             text_fg=(1, 0.9, 0.4, 1),
             frameColor=(0, 0, 0, 0),
@@ -41,21 +44,21 @@ class PauseMenu:
             text_align=TextNode.ACenter,
         )
         if font:
-            self._apply_font_to_label(title, font)
+            self._apply_font_to_label(self.title_label, font)
 
         options = [
-            ("Restart current stage", "restart"),
-            ("Load game", "load"),
-            ("Settings", "settings"),
-            ("Exit game", "exit"),
+            ("pause.restart", "restart"),
+            ("pause.load", "load"),
+            ("pause.settings", "settings"),
+            ("pause.exit", "exit"),
         ]
         btn_h = 0.07
         spacing = 0.08
         start_y = 0.12
-        for i, (text, key) in enumerate(options):
+        for i, (text_key, key) in enumerate(options):
             y = start_y - i * (btn_h + spacing)
             btn = DirectButton(
-                text=text,
+                text=t(text_key),
                 text_scale=0.045,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0.2, 0.25, 0.4, 1),
@@ -69,9 +72,16 @@ class PauseMenu:
             if font:
                 self._apply_font_to_button(btn, font)
             self.buttons.append(btn)
+            self._button_keys.append(text_key)
 
         self.frame.reparentTo(self.base.aspect2d)
         self.frame.hide()
+
+    def refresh_locale(self):
+        if self.title_label:
+            self.title_label["text"] = t("pause.title")
+        for btn, text_key in zip(self.buttons, self._button_keys):
+            btn["text"] = t(text_key)
 
     def _apply_font_to_label(self, label, font):
         try:
