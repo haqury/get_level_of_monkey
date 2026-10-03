@@ -90,6 +90,7 @@ class Game(ShowBase):
         self.on_pause_restart = self._on_pause_restart
         self.on_pause_load = self._on_pause_load
         self.on_pause_settings = self._on_pause_settings
+        self.on_pause_brainlink_settings = self._on_pause_brainlink_settings
         self.on_pause_exit = self._on_pause_exit
         
         # ESC opens pause menu — bound in InputManager and calls self._on_escape
@@ -157,7 +158,49 @@ class Game(ShowBase):
         return {
             "window": {"title": "Fucking Pickup", "width": 1920, "height": 1080, "fullscreen": True, "fps": 60},
             "player": {"name": "Player", "initial_hp": 3, "initial_energy": 100, "energy_regen_rate": 5.0, "move_cost": 100, "move_speed": 5},
-            "brainlink": {"enabled": True, "memory_name": "brainlink_data", "check_interval": 0.016, "send_keyboard_events": True, "send_to_history": True, "send_to_ml": False, "confidence_threshold": 0.5, "min_confidence": 0.25, "full_confidence": 0.7, "prediction_weights": [1.0, 1.0, 1.0, 1.0], "model_path": ""},
+            "brainlink": {
+                "enabled": True,
+                "memory_name": "brainlink_data",
+                "check_interval": 0.016,
+                "prediction_mode": "base",
+                "send_keyboard_events": True,
+                "send_to_history": True,
+                "send_to_ml": False,
+                "send_brainlink_events": True,
+                "confidence_threshold": 0.5,
+                "min_confidence": 0.25,
+                "full_confidence": 0.7,
+                "prediction_weights": [1.0, 1.0, 1.0, 1.0],
+                "model_path": "",
+                "history_path": "",
+                "base_fault": {
+                    "attention": 5,
+                    "meditation": 10,
+                    "signal": 0,
+                    "delta": 300,
+                    "theta": 300,
+                    "low_alpha": 0,
+                    "high_alpha": 0,
+                    "low_beta": 0,
+                    "high_beta": 0,
+                    "low_gamma": 0,
+                    "high_gamma": 0,
+                },
+                "multi_fault": {
+                    "attention": 1,
+                    "meditation": 1,
+                    "signal": 1,
+                    "delta": 3,
+                    "theta": 3,
+                    "low_alpha": 3,
+                    "high_alpha": 3,
+                    "low_beta": 3,
+                    "high_beta": 3,
+                    "low_gamma": 3,
+                    "high_gamma": 3,
+                },
+                "multi_count": 1,
+            },
             "controls": {
                 "keyboard": {"up": "arrow_up", "down": "arrow_down", "left": "arrow_left", "right": "arrow_right", "action": "space", "sit_pause": "p"},
                 "keyboard_local": {"up": "", "down": "", "left": "", "right": "", "action": "", "sit_pause": ""},
@@ -668,20 +711,28 @@ class Game(ShowBase):
         self.scene_manager.switch_to(scene_id, self.player)
         logger.info(f"Game loaded, scene: {scene_id}")
     
-    def _on_pause_settings(self):
-        """Open settings (main menu with settings panel). Scene kept in memory so returning does not reset game."""
+    def _open_menu_overlay_from_pause(self):
+        """Switch to main menu scene without resetting game (return via settings close)."""
         self.pause_menu.hide()
         self.in_game = False
         self.hud.hide()
-        return_scene_id = self.scene_manager.get_current_scene_name()
-        self._return_scene_id = return_scene_id
+        self._return_scene_id = self.scene_manager.get_current_scene_name()
         self._from_pause_settings = True
         self.scene_manager.switch_to("main_menu", self.player, keep_previous=True)
         menu = self.scene_manager.get_current_scene()
-        if menu and hasattr(menu, "_on_settings_clicked"):
-            menu._on_settings_clicked()
         if menu and hasattr(menu, "_update_from_pause_buttons"):
             menu._update_from_pause_buttons()
+        return menu
+
+    def _on_pause_settings(self):
+        menu = self._open_menu_overlay_from_pause()
+        if menu and hasattr(menu, "_open_settings_panel"):
+            menu._open_settings_panel("resolution")
+
+    def _on_pause_brainlink_settings(self):
+        menu = self._open_menu_overlay_from_pause()
+        if menu and hasattr(menu, "_open_brainlink_settings_panel"):
+            menu._open_brainlink_settings_panel()
 
     def _return_from_settings_to_game(self):
         """Return to game from settings (without resetting)."""

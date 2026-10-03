@@ -1,0 +1,154 @@
+# Задание для агента: BrainLink Client — синхронизация Config Fault с игрой
+
+## Проблема (сейчас)
+
+Игра **get_level_of_monkey** при открытии «Настройки BrainLink» вызывает синхронизацию (`src/services/brainlink_config_sync.py`):
+
+1. Если есть SHM — шлёт **COMMAND_TYPE 9** и читает `%APPDATA%\BrainLink\brainlink_export_for_game.json`.
+2. Иначе читает файлы в `{brainlink_install}/config/config.json` или `def_conf.json` + `history_config.json`.
+
+**Config Fault в клиенте не подтягивается в игру**, потому что:
+
+- Окно **Configuration** (`ui/config_form.py`) может сохранять fault в **произвольный путь** (`txt_filepath`), а игра **не знает** этот путь и читает только `{install}/config/*.json`.
+- Кнопка **Save Config** пишет JSON на диск, но **не обновляет** `MainWindow.config` и **не экспортирует** настройки для игры.
+- **Apply** обновляет память через `set_config_fault`, но экспорт/type 9 может **отсутствовать** в запущенной у пользователя сборке клиента.
+- В форме Config Fault **нет поля `signal`**, а игра показывает 11 полей включая `signal` — при Apply из формы `signal` может сбрасываться к дефолту модели.
+- `get_app_base_dir()` = `Path.cwd()` — config лежит относительно **cwd** процесса; игра ищет config относительно **пути репозитория** из `config/brainlink_path.json` — при другом cwd файлы расходятся.
+
+**Цель:** клиент — единственный источник правды для **текущего Base Fault** (in-memory + последний сохранённый файл); игра при открытии панели получает те же значения, что видит пользователь в Config Fault / rule-based prediction.
+
+---
+
+## Что реализовать в BrainLink Client
+
+### 1. Единый экспорт настроек для игры (доработать или добавить)
+
+Файл: `utils/brainlink_game_export.py` (создать, если нет).
+
+Путь: `%APPDATA%\BrainLink\brainlink_export_for_game.json`  
+Запись: temp + atomic replace.
+
+**Минимальный контракт JSON (версия 1):**
+
+```json
+{
+  "export_version": 1,
+  "updated_at": 1730000000.0,
+  "client_cwd": "C:\\Users\\...\\BrainLinkClient",
+  "fault_config_path": "C:\\Users\\...\\BrainLinkClient\\config\\def_conf.json",
+  "brainlink": {
+    "prediction_mode": "base",
+    "history_path": "C:\\BLconfig\\test.json",
+    "model_path": "C:\\...\\models_ml\\brainlink_classifier.pkl",
+    "confidence_threshold": 0.6,
+    "prediction_weights": [1.0, 1.0, 1.0, 1.0],
+    "base_fault": {
+      "attention": 5,
+      "meditation": 10,
+      "signal": 0,
+      "delta": 300,
+      "theta": 300,
+      "low_alpha": 800,
+      "high_alpha": 800,
+      "low_beta": 800,
+      "high_beta": 800,
+      "low_gamma": 800,
+      "high_gamma": 800
+    }
+  }
+}
+```
+
+**Правила заполнения `base_fault`:**
+
+- Источник — **`MainWindow.config.eeg_fault.to_dict()`** (in-memory после Apply / load / command 5).
+- Если открыт диалог **ConfigForm** (`config_form` не None и visible) — при export/type 9 **дополнительно** взять base из `config_form.get_config_fault()`, но **сохранить `signal`** из текущего `config.eeg_fault.signal` (пока в UI нет поля signal).
+- Все 11 ключей обязательны в export (int).
+
+**Поле `fault_config_path`:**
+
+- Абсолютный путь к последнему файлу fault JSON (из `config_form.txt_filepath` после Save/Load, или путь `save_fault_config` / `load_fault_config`).
+- Персистить в `config/fault_config_path.json`: `{"fault_config_path": "..."}` при Save/Apply/Load в ConfigForm.
+
+**Поле `client_cwd`:** `str(Path.cwd())` для отладки расхождения cwd vs install path.
+
+### 2. Когда вызывать `write_brainlink_export(main_window)`
+
+Обязательно:
+
+- После `MainWindow.set_config_fault(...)` (Apply, load config, game command 5).
+- После `ConfigForm.on_ok_clicked` (Apply).
+- После `ConfigForm.on_save_clicked` — **и** обновить parent через `set_config_fault(..., persist=False)` или хотя бы `config.eeg_fault`, затем export.
+- После смены prediction mode, save history path, load/save model (как сейчас для ML).
+- При старте UI: `QTimer.singleShot(800, ...)` после загрузки `load_fault_config()`.
+- По **COMMAND_TYPE 9** (см. ниже).
+
+### 3. COMMAND_TYPE 9 — `export_settings_for_game`
+
+В `on_shm_command_received` **до** проверки «Accept commands» (как types 3–8):
+
+- Type **9**: вызвать `write_brainlink_export(self)`, log info, **без** tray spam.
+- Не требует `game_config.json`.
+
+Обновить комментарии: `services/shared_memory_service.py`, `SHARED_MEMORY_API.md` (таблица 1–9).
+
+### 4. Config Form — согласованность с игрой
+
+- `on_save_clicked`: после `save_fault_config(...)` вызвать `parent.set_config_fault(base, multi, multi_count, persist=False)` **или** явно присвоить `parent.config.eeg_fault = base`, пересобрать `eeg_faults`, сохранить `fault_config_path`, `write_brainlink_export(parent)`.
+- Опционально (желательно): добавить в UI поле **Signal** в Base group (0–200), включить в `EEG_FIELDS` / `get_config_fault`, чтобы export и игра совпадали с клиентом.
+
+### 5. Путь config vs cwd
+
+- При Save/Load в ConfigForm записывать `fault_config_path` в `config/fault_config_path.json` (через `get_config_dir()`).
+- В export всегда отдавать **абсолютный** `fault_config_path`.
+
+### 6. Тесты / ручная проверка
+
+1. Запустить клиент, Enable Shared Memory.
+2. Config Fault → изменить low_alpha → **Apply** → проверить export: `base_fault.low_alpha` совпадает.
+3. Config Fault → **Save Config** в `C:\BLconfig\my_fault.json` → export: `fault_config_path` = этот файл, `base_fault` совпадает.
+4. Из игры (или `test_game_commands.py`) отправить type **9** → mtime export обновился, JSON валиден.
+5. Игра открывает BrainLink settings → fault в UI = export (после доработки игры по промпту ниже).
+
+---
+
+## Ограничения
+
+- Не менять layout shared memory (31×int32).
+- Types 1–8 не ломать.
+- `multi_fault` / `multi_count` в export **не обязательны** для игры (игра редактирует только `base_fault`), но можно добавить в export для будущего.
+
+---
+
+## ОБЯЗАТЕЛЬНЫЙ результат для команды игры
+
+В **конце своего ответа** выдай отдельным markdown-блоком с заголовком:
+
+## Промпт для агента get_level_of_monkey
+
+Блок **готов к copy-paste** в чат агента репозитория игры. Включи **конкретные** финальные значения после твоей реализации:
+
+1. **Точный путь и имя файла экспорта** (`%APPDATA%\BrainLink\...`).
+2. **Полная схема JSON** (`export_version`, `fault_config_path`, `brainlink.base_fault` — все 11 полей).
+3. **COMMAND_TYPE 9** — поведение, timeout ожидания файла (рекомендация для игры).
+4. **Порядок синхронизации при `_open_brainlink_settings_panel`:**
+   - type 9 если connected;
+   - чтение export;
+   - fallback: `fault_config_path` из export **или** `config/fault_config_path.json` в install dir **или** `config/config.json` / `def_conf.json`;
+   - merge в `game_config["brainlink"]` без перезаписи `send_*` флагов игры.
+5. **Список файлов игры для правки** (ожидаемо: `src/services/brainlink_config_sync.py`, возможно `src/integration/brainlink.py`, `src/scenes/main_menu.py`).
+6. **Чеклист E2E:** Config Fault Apply/Save → открыть настройки BrainLink в игре → поля fault совпадают.
+7. Если ты **переименовал** ключи или изменил номер команды — явно в начале блока.
+
+---
+
+## Ссылки
+
+- Игра: `C:\Users\haqury\PycharmProjects\get_level_of_monkey`
+  - `src/services/brainlink_config_sync.py` — текущая синхронизация
+  - `src/scenes/main_menu.py` — `_open_brainlink_settings_panel`, поля fault
+  - `src/integration/brainlink.py` — `send_export_settings_command` (type 9), если уже добавлен
+- Клиент:
+  - `ui/config_form.py` — Config Fault Save/Apply/Load, `txt_filepath`
+  - `config_defaults.py` — `load_fault_config` / `save_fault_config`
+  - `ui/main_window.py` — `set_config_fault`, `on_shm_command_received`

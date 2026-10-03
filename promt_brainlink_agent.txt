@@ -1,0 +1,148 @@
+# Задание для агента: BrainLink Client (управление из игры через Shared Memory)
+
+## Контекст
+
+Игра **get_level_of_monkey** (Panda3D) подключается к BrainLink Client через shared memory `brainlink_data`. Игра уже умеет:
+
+- читать события движения и ML stats (confidence, probs);
+- отправлять команды Game → Client через поля COMMAND_* (offset 21–24);
+- передавать путь к конфигу игры через `--game-config` при запуске клиента и/или файл `%APPDATA%\BrainLink\game_config_path.txt`.
+
+Сейчас клиент обрабатывает в `on_shm_command_received` (см. `ui/main_window.py`):
+
+| COMMAND_TYPE | Действие |
+|--------------|----------|
+| 1 | Сохранить событие в history (нужен EEG с устройства) |
+| 2 | Сохранить событие для ML training |
+| 3 | Сохранить обученную модель в путь из `game_config.json` → `brainlink.model_path` (обрабатывается **всегда**, даже если «Accept commands from games» выключен) |
+
+В UI клиента уже есть переключатель **Prediction: Base / ML** (`rb_pred_base`, `rb_pred_ml`, флаг `_use_ml_prediction`), форма **Base Fault Tolerance** (`ui/config_form.py`, `EegFaultModel`), окно **ML Control** (load/save model, reset model, загрузка history → rebuild training data).
+
+**Цель:** игрок меняет режим и настройки из игры; клиент применяет их по коротким командам shared memory, читая полезную нагрузку из JSON конфига игры (тот же файл, что для команды 3).
+
+---
+
+## Что нужно реализовать в BrainLink Client
+
+### 1. Новые типы команд (расширить COMMAND_TYPE)
+
+Добавь и обработай в `on_shm_command_received` (и обнови комментарии в `services/shared_memory_service.py`, `SHARED_MEMORY_API.md`, пример `examples/shared_memory_client.py` если есть):
+
+| TYPE | Название | Поведение |
+|------|----------|-----------|
+| 4 | `set_prediction_mode` | Прочитать game config, секция `brainlink.prediction_mode`: `"base"` \| `"ml"`. Установить тот же режим, что радиокнопки Base/ML: `_use_ml_prediction`, синхронизировать `rb_pred_base`, `rb_pred_ml`, `chk_use_ml_prediction`, вызвать существующую логику `on_prediction_mode_changed` / `on_use_ml_prediction_changed` без дублирования. |
+| 5 | `apply_base_fault` | Прочитать `brainlink.base_fault` — объект с полями `EegFaultModel`: `attention`, `meditation`, `signal`, `delta`, `theta`, `low_alpha`, `high_alpha`, `low_beta`, `high_beta`, `low_gamma`, `high_gamma`. Применить к текущему `ConfigParams` так же, как UI config form для Base Fault. Сохранить в config клиента (`config.json` / существующий путь через `save_fault_config` или аналог). **Не менять** `multi_fault` и `multi_count`, если их нет в конфиге игры. |
+| 6 | `load_model` | Прочитать `brainlink.model_path`, resolve absolute path, записать в `ml_trainer.config.model_path`, загрузить модель в predictor (как кнопка Load Model в `ui/ml_control_form.py`). При ошибке — log + tray message, не падать. |
+| 7 | `reset_model` | Вызвать `ml_trainer.reset_model()`. **Не удалять** файл history и in-memory history, если это текущее поведение reset — только сброс обученной модели в памяти. |
+| 8 | `load_history` | Прочитать путь из `brainlink.history_path`, загрузить JSON истории (`EegHistoryModel`), тот же формат что `data/history.json`. Подключить к `history_service`, затем **пересобрать** ML training data тем же кодом, что при загрузке history в главном окне (`clear_training_data` + import из history). |
+
+Команды **4–8** обрабатывать **независимо** от чекбокса «Accept commands from games» — по аналогии с командой **3**.
+
+Команды **1, 2, 3** не ломать.
+
+### 2. Разрешение пути к game config
+
+Вынести в общий helper (если ещё нет): получение пути к `game_config.json` из:
+
+1. `self._game_config_path` (аргумент `--game-config` при старте);
+2. fallback: `%APPDATA%\BrainLink\game_config_path.txt`.
+
+Использовать этот helper для команд 3–8.
+
+### 3. Контракт JSON в game config (зафиксировать в коде/комментарии)
+
+Пример структуры, которую будет писать игра **перед** отправкой команды:
+
+```json
+{
+  "brainlink": {
+    "prediction_mode": "base",
+    "model_path": "C:\\BLconfig\\model.pkl",
+    "history_path": "C:\\BLconfig\\history.json",
+    "base_fault": {
+      "attention": 5,
+      "meditation": 10,
+      "signal": 0,
+      "delta": 300,
+      "theta": 300,
+      "low_alpha": 0,
+      "high_alpha": 0,
+      "low_beta": 0,
+      "high_beta": 0,
+      "low_gamma": 0,
+      "high_gamma": 0
+    }
+  }
+}
+```
+
+Поля опциональны по команде: для type 4 нужен только `prediction_mode`; для 5 — `base_fault`; для 6 — `model_path`; для 8 — `history_path`.
+
+### 4. Протокол отправки команды (Game → Client)
+
+Без изменения layout памяти (если возможно): как сейчас для type 3:
+
+- `COMMAND_TYPE` = 4..8
+- `COMMAND_EVENT_CODE` = 0 (не используется)
+- `COMMAND_TIMESTAMP` = по желанию
+- `COMMAND_PENDING` = 1
+
+Клиент после обработки сбрасывает pending как для существующих команд.
+
+### 5. Тесты / проверка
+
+- Минимум: ручной сценарий или существующий `test_game_control.py` — отправка type 4 и проверка переключения режима.
+- Убедиться, что при `prediction_mode: ml` без модели поведение совпадает с текущим UI (логи, без краша).
+
+### 6. Документация
+
+Кратко обновить `SHARED_MEMORY_API.md`: таблица COMMAND_TYPE 1–8 и список ключей в game config.
+
+---
+
+## Ограничения
+
+- Не менять размер/offsets shared memory без крайней необходимости (игра уже читает 31 int32).
+- Не удалять deprecated UI в ML Control — только добавить API для игры.
+- Сохранить совместимость с текущим `--game-config` и `brainlink.model_path` для save (type 3).
+
+---
+
+## ОБЯЗАТЕЛЬНЫЙ результат для команды игры
+
+В **конце своего ответа** выдай отдельным блоком markdown с заголовком:
+
+## Промпт для агента get_level_of_monkey
+
+Этот блок должен быть **готов к copy-paste** в чат агента в репозитории игры. Включи:
+
+1. **Точный список COMMAND_TYPE 1–8** (как реализовано у тебя, с финальными номерами).
+2. **Точные ключи `game_config.json`** в секции `brainlink` (имена полей, типы, примеры).
+3. **Порядок действий в игре** для каждой кнопки/настройки:
+   - записать JSON на диск (какой файл, atomic save если нужно);
+   - вызвать метод в `src/integration/brainlink.py` (предложи сигнатуры новых методов: `send_set_prediction_mode_command`, `send_apply_base_fault_command`, и т.д.);
+   - проверка `is_connected()` и сообщение пользователю.
+4. **UI в `src/scenes/main_menu.py`**, вкладка BrainLink:
+   - переключатель Base / ML;
+   - в режиме Base — поля fault (какие поля, компактная вёрстка или scroll);
+   - в режиме ML — кнопки: Load model, Save model (уже есть), Reset model, Load history file; file dialogs + пути в config.
+5. **i18n**: ключи для `config/locale/en.json` и `ru.json`.
+6. **Связь с существующими флагами** `send_to_history`, `send_to_ml`, `send_keyboard_events` — что имеет смысл показывать/скрывать в каждом режиме (рекомендация).
+7. **Файлы игры для правки** (список путей).
+8. **Чеклист ручного теста** end-to-end: игра → config → command → клиент.
+
+Если ты изменил номера команд или имена ключей JSON относительно этого ТЗ — явно укажи расхождения в начале промпта для игры.
+
+---
+
+## Ссылки в репозитории BrainLink Client
+
+- `ui/main_window.py` — `on_shm_command_received`, prediction mode, history load + ML rebuild
+- `ui/config_form.py` — base/multi fault load/save
+- `ui/ml_control_form.py` — load/save/reset model
+- `services/shared_memory_service.py` — layout COMMAND_*
+- `config_defaults.py`, `models/eeg_models.py` — EegFaultModel
+- `services/ml_trainer_service.py` — reset_model, clear_training_data, save_model
+
+Путь к игре (для справки): `C:\Users\haqury\PycharmProjects\get_level_of_monkey`
+Интеграция игры: `src/integration/brainlink.py`, настройки: `src/scenes/main_menu.py`, конфиг: `config/game_config.json`

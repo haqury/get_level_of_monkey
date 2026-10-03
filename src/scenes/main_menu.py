@@ -13,8 +13,44 @@ from direct.gui.OnscreenText import OnscreenText
 from panda3d.core import TextNode, CardMaker
 from src.scenes.base_scene import BaseScene
 from src.core.i18n import t, get_locale
+from src.services.brainlink_config_sync import sync_brainlink_config_from_client
 
 logger = logging.getLogger(__name__)
+
+BRAINLINK_BASE_FAULT_FIELDS = (
+    "attention", "meditation", "signal", "delta", "theta",
+    "low_alpha", "high_alpha", "low_beta", "high_beta", "low_gamma", "high_gamma",
+)
+
+DEFAULT_BASE_FAULT = {
+    "attention": 5,
+    "meditation": 10,
+    "signal": 0,
+    "delta": 300,
+    "theta": 300,
+    "low_alpha": 0,
+    "high_alpha": 0,
+    "low_beta": 0,
+    "high_beta": 0,
+    "low_gamma": 0,
+    "high_gamma": 0,
+}
+
+DEFAULT_MULTI_FAULT = {
+    "attention": 1,
+    "meditation": 1,
+    "signal": 1,
+    "delta": 3,
+    "theta": 3,
+    "low_alpha": 3,
+    "high_alpha": 3,
+    "low_beta": 3,
+    "high_beta": 3,
+    "low_gamma": 3,
+    "high_gamma": 3,
+}
+
+DEFAULT_MULTI_COUNT = 1
 
 
 class MainMenuScene(BaseScene):
@@ -134,16 +170,23 @@ class MainMenuScene(BaseScene):
             text_font=font
         )
         
-        # Play button - old style, same size as others, moved down, half size
-        # Button height is 0.2 (from -0.1 to 0.1), so buttons will be spaced 0.2 apart
-        # Moved down by 1/10 screen (0.2 units)
+        # Main menu buttons: compact height + fixed vertical gap (no overlap)
+        _menu_btn_w = 0.25
+        _menu_btn_h = 0.045
+        _menu_btn_step = _menu_btn_h * 2 + 0.02
+        _menu_play_z = -0.28
+        _menu_settings_z = _menu_play_z - _menu_btn_step
+        _menu_brainlink_z = _menu_settings_z - _menu_btn_step
+        _menu_quit_z = _menu_brainlink_z - _menu_btn_step
+        _menu_btn_frame = (-_menu_btn_w, _menu_btn_w, -_menu_btn_h, _menu_btn_h)
+
         self.play_btn = DirectButton(
             text=t("menu.play"),
-            text_scale=0.035,
+            text_scale=0.032,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.2, 0.6, 0.2, 1),
-            frameSize=(-0.25, 0.25, -0.1, 0.1),
-            pos=(0, 0, -0.3),
+            frameSize=_menu_btn_frame,
+            pos=(0, 0, _menu_play_z),
             command=self._on_play_clicked,
             text_font=font
         )
@@ -182,25 +225,38 @@ class MainMenuScene(BaseScene):
 
         self.settings_btn = DirectButton(
             text=t("menu.config"),
-            text_scale=0.03,
+            text_scale=0.028,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.2, 0.2, 0.6, 1),
-            frameSize=(-0.25, 0.25, -0.1, 0.1),
-            pos=(0, 0, -0.5),
+            frameSize=_menu_btn_frame,
+            pos=(0, 0, _menu_settings_z),
             command=self._on_settings_clicked,
             text_font=font
         )
         if font:
             self._apply_font_to_button(self.settings_btn, font)
+
+        self.brainlink_settings_btn = DirectButton(
+            text=t("menu.brainlink_settings"),
+            text_scale=0.024,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.2, 0.45, 0.55, 1),
+            frameSize=_menu_btn_frame,
+            pos=(0, 0, _menu_brainlink_z),
+            command=self._on_brainlink_settings_clicked,
+            text_font=font,
+        )
+        if font:
+            self._apply_font_to_button(self.brainlink_settings_btn, font)
         
-        # Quit button - touching Config button (Config bottom at -0.6, Quit top at -0.6, center at -0.7)
+        # Quit button
         self.quit_btn = DirectButton(
             text=t("menu.quit"),
-            text_scale=0.035,
+            text_scale=0.032,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.6, 0.2, 0.2, 1),
-            frameSize=(-0.25, 0.25, -0.1, 0.1),
-            pos=(0, 0, -0.7),
+            frameSize=_menu_btn_frame,
+            pos=(0, 0, _menu_quit_z),
             command=self._on_quit_clicked,
             text_font=font
         )
@@ -213,8 +269,8 @@ class MainMenuScene(BaseScene):
             text_scale=0.032,
             text_fg=(1, 1, 1, 1),
             frameColor=(0.2, 0.5, 0.3, 1),
-            frameSize=(-0.28, 0.28, -0.1, 0.1),
-            pos=(0, 0, -0.3),
+            frameSize=_menu_btn_frame,
+            pos=(0, 0, _menu_play_z),
             command=self._on_back_to_game_clicked,
             text_font=font
         )
@@ -225,7 +281,7 @@ class MainMenuScene(BaseScene):
         # Controls info - properly scaled, positioned just below Quit button
         self.controls_text = OnscreenText(
             text=t("menu.controls_hint"),
-            pos=(0, -0.85),
+            pos=(0, _menu_quit_z - _menu_btn_h - 0.08),
             scale=0.028,
             fg=(0.7, 0.7, 0.7, 1),
             shadow=(0, 0, 0, 0.5),
@@ -234,8 +290,9 @@ class MainMenuScene(BaseScene):
             align=TextNode.ACenter
         )
 
-        # Settings panel (hidden by default)
+        # Settings panels (hidden by default)
         self._create_settings_panel(font)
+        self._create_brainlink_settings_panel(font)
         
         # Hide all initially
         self._hide_all()
@@ -256,10 +313,14 @@ class MainMenuScene(BaseScene):
         if hasattr(self, 'player_name_entry'):
             self.player_name_entry.hide()
         self.settings_btn.hide()
+        if hasattr(self, "brainlink_settings_btn"):
+            self.brainlink_settings_btn.hide()
         self.quit_btn.hide()
         self.controls_text.hide()
         if hasattr(self, 'settings_frame'):
             self.settings_frame.hide()
+        if hasattr(self, 'brainlink_settings_frame'):
+            self.brainlink_settings_frame.hide()
     
     def _show_all(self):
         """Show all UI elements"""
@@ -276,6 +337,8 @@ class MainMenuScene(BaseScene):
         if hasattr(self, 'player_name_entry'):
             self.player_name_entry.show()
         self.settings_btn.show()
+        if hasattr(self, "brainlink_settings_btn"):
+            self.brainlink_settings_btn.show()
         self.quit_btn.show()
         self.controls_text.show()
         # Settings frame stays hidden unless opened
@@ -381,7 +444,7 @@ class MainMenuScene(BaseScene):
         # Content frames for each tab
         self._create_resolution_tab(font)
         self._create_controls_tab(font)
-        self._create_brainlink_tab(font)
+        self._create_brainlink_general_tab(font)
         
         # Close button — на 1/6 экрана ниже (aspect2d: ~0.17 вниз)
         self.settings_close_btn = DirectButton(
@@ -391,7 +454,7 @@ class MainMenuScene(BaseScene):
             frameColor=(0.5, 0.2, 0.2, 1),
             frameSize=(-0.3, 0.3, -0.06, 0.06),
             pos=(0, 0, -0.62),
-            command=self._on_settings_clicked,
+            command=self._close_settings_panel,
             parent=self.settings_frame,
             text_font=font,
             relief=1,
@@ -403,6 +466,44 @@ class MainMenuScene(BaseScene):
         # Start with resolution tab active
         self._switch_settings_tab("resolution")
         self.settings_frame.hide()
+
+    def _create_brainlink_settings_panel(self, font):
+        """Separate BrainLink settings screen (not a tab in general settings)."""
+        self.brainlink_settings_frame = DirectFrame(
+            frameColor=(0.05, 0.05, 0.1, 0.9),
+            frameSize=(-0.62, 0.62, -0.62, 0.52),
+            pos=(0, 0, 0.0),
+            borderWidth=(0.008, 0.008),
+            borderUvWidth=(0.008, 0.008),
+        )
+        self.brainlink_settings_title = DirectLabel(
+            text=t("settings.brainlink_title"),
+            text_scale=0.05,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, 0.44),
+            parent=self.brainlink_settings_frame,
+            text_font=font,
+            text_align=TextNode.ACenter,
+        )
+        # Close first so tab content draws above it (DirectGui paint order).
+        self.brainlink_settings_close_btn = DirectButton(
+            text=t("settings.close"),
+            text_scale=0.035,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.5, 0.2, 0.2, 1),
+            frameSize=(-0.28, 0.28, -0.045, 0.045),
+            pos=(0, 0, -0.565),
+            command=self._close_brainlink_settings_panel,
+            parent=self.brainlink_settings_frame,
+            text_font=font,
+            relief=1,
+            borderWidth=(0.005, 0.005),
+        )
+        self._create_brainlink_tab(font)
+        if font:
+            self._apply_font_to_button(self.brainlink_settings_close_btn, font)
+        self.brainlink_settings_frame.hide()
     
     def _create_settings_tabs(self, font):
         """Create tab buttons for settings categories"""
@@ -411,9 +512,9 @@ class MainMenuScene(BaseScene):
         
         # Tab button width is 0.36 (from -0.18 to 0.18), so spacing them with gaps
         tab_positions = [
-            (t("settings.tab_resolution"), "resolution", -0.45),
-            (t("settings.tab_controls"), "controls", -0.05),
-            (t("settings.tab_brainlink"), "brainlink", 0.35)
+            (t("settings.tab_resolution"), "resolution", -0.38),
+            (t("settings.tab_controls"), "controls", 0.0),
+            (t("settings.tab_brainlink"), "brainlink", 0.38),
         ]
         
         self._tab_label_keys = {
@@ -425,10 +526,10 @@ class MainMenuScene(BaseScene):
         for text, tab_id, x_pos in tab_positions:
             btn = DirectButton(
                 text=text,
-                text_scale=0.032,
+                text_scale=0.028,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0.2, 0.2, 0.3, 1),
-                frameSize=(-0.18, 0.18, -0.05, 0.05),
+                frameSize=(-0.15, 0.15, -0.05, 0.05),
                 pos=(x_pos, 0, 0.35),
                 command=self._switch_settings_tab,
                 extraArgs=[tab_id],
@@ -830,60 +931,21 @@ class MainMenuScene(BaseScene):
             btn["text"] = self._key_display_name(key_name)
         logger.info("Key bound (%s): %s -> %s", column, action, key_name or "(none)")
     
-    def _create_brainlink_tab(self, font):
-        """Create BrainLink settings tab"""
-        self.brainlink_frame = DirectFrame(
+    def _create_brainlink_general_tab(self, font):
+        """General BrainLink params (thresholds, weights) under Settings → BrainLink tab."""
+        self.brainlink_general_frame = DirectFrame(
             frameColor=(0, 0, 0, 0),
-            frameSize=(-0.55, 0.55, -0.56, 0.25),
+            frameSize=(-0.55, 0.55, -0.42, 0.28),
             pos=(0, 0, 0.05),
-            parent=self.settings_frame
+            parent=self.settings_frame,
         )
-        
-        # Get current BrainLink config
         bl_config = {}
-        if hasattr(self.base, 'game_config'):
+        if hasattr(self.base, "game_config"):
             bl_config = self.base.game_config.get("brainlink", {})
-        
-        # BrainLink settings checkboxes (same style as other tabs: button as checkbox)
-        settings = [
-            ("settings.bl_send_keyboard", "send_keyboard_events", 0.15, bl_config.get("send_keyboard_events", True)),
-            ("settings.bl_send_history", "send_to_history", 0.05, bl_config.get("send_to_history", True)),
-            ("settings.bl_send_ml", "send_to_ml", -0.05, bl_config.get("send_to_ml", True)),
-            ("settings.bl_send_events", "send_brainlink_events", -0.15, bl_config.get("send_brainlink_events", True)),
-        ]
-        
-        self.brainlink_checkboxes = {}
-        self.brainlink_setting_labels = {}
-        for label_key, key, z_pos, default_value in settings:
-            lbl = DirectLabel(
-                text=t(label_key) + ":",
-                text_scale=0.035,
-                text_fg=(1, 1, 1, 1),
-                frameColor=(0, 0, 0, 0),
-                pos=(-0.4, 0, z_pos),
-                parent=self.brainlink_frame,
-                text_font=font,
-                text_align=TextNode.ALeft
-            )
-            self.brainlink_setting_labels[key] = (lbl, label_key)
-            
-            checkbox = DirectButton(
-                text="+" if default_value else "",
-                text_scale=0.05,
-                text_fg=(0.9, 1, 0.9, 1) if default_value else (0.5, 0.5, 0.5, 1),
-                frameColor=(0.15, 0.4, 0.2, 1) if default_value else (0.22, 0.22, 0.28, 1),
-                frameSize=(-0.055, 0.055, -0.045, 0.045),
-                pos=(0.35, 0, z_pos),
-                command=self._toggle_brainlink_setting,
-                extraArgs=[key],
-                parent=self.brainlink_frame,
-                text_font=font,
-                relief=2,
-                borderWidth=(0.008, 0.008)
-            )
-            self.brainlink_checkboxes[key] = checkbox
-        
-        # Numeric settings — always-visible input fields
+        self._build_brainlink_general_params_ui(self.brainlink_general_frame, font, bl_config)
+        self.brainlink_general_frame.hide()
+
+    def _build_brainlink_general_params_ui(self, parent, font, bl_config):
         entry_font = DGG.getDefaultFont()
         _entry_color = (0.28, 0.32, 0.45, 1)
 
@@ -898,26 +960,27 @@ class MainMenuScene(BaseScene):
                 self._brainlink_apply_single_field(key)
             return _cmd
 
-        self.brainlink_field_labels = {}
+        if not hasattr(self, "brainlink_field_labels"):
+            self.brainlink_field_labels = {}
 
-        def _config_entry_row(label_key, z_pos, config_key, default_val, width=8):
+        def _config_entry_row(label_key, z_pos, config_key, default_val, width=5):
             val = bl_config.get(config_key, default_val)
             text = _float_fmt(val)
             lbl = DirectLabel(
                 text=t(label_key),
-                text_scale=0.032,
+                text_scale=0.028,
                 text_fg=(1, 1, 1, 1),
                 frameColor=(0, 0, 0, 0),
-                pos=(-0.4, 0, z_pos),
-                parent=self.brainlink_frame,
+                pos=(-0.5, 0, z_pos),
+                parent=parent,
                 text_font=font,
                 text_align=TextNode.ALeft,
             )
             self.brainlink_field_labels[config_key] = (lbl, label_key)
             entry = DirectEntry(
-                parent=self.brainlink_frame,
-                scale=0.04,
-                pos=(0.08, 0, z_pos),
+                parent=parent,
+                scale=0.032,
+                pos=(0.38, 0, z_pos),
                 width=width,
                 numLines=1,
                 initialText=text,
@@ -944,23 +1007,25 @@ class MainMenuScene(BaseScene):
         self._brainlink_active_field = None
         self._brainlink_weights_active = False
 
+        _row = 0.18
+        _step = 0.055
         self.brainlink_entries = {
             "confidence_threshold": {
-                "entry": _config_entry_row("settings.bl_conf_threshold", -0.26, "confidence_threshold", 0.5),
+                "entry": _config_entry_row("settings.bl_conf_threshold", _row, "confidence_threshold", 0.5),
                 "default": 0.5,
                 "parse": _float_parse,
                 "fmt": _float_fmt,
                 "clamp": (0.0, 1.0),
             },
             "min_confidence": {
-                "entry": _config_entry_row("settings.bl_min_confidence", -0.32, "min_confidence", 0.25),
+                "entry": _config_entry_row("settings.bl_min_confidence", _row - _step, "min_confidence", 0.25),
                 "default": 0.25,
                 "parse": _float_parse,
                 "fmt": _float_fmt,
                 "clamp": (0.0, 1.0),
             },
             "full_confidence": {
-                "entry": _config_entry_row("settings.bl_full_confidence", -0.38, "full_confidence", 0.7),
+                "entry": _config_entry_row("settings.bl_full_confidence", _row - 2 * _step, "full_confidence", 0.7),
                 "default": 0.7,
                 "parse": _float_parse,
                 "fmt": _float_fmt,
@@ -970,25 +1035,23 @@ class MainMenuScene(BaseScene):
 
         weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
         weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
-
+        _weights_z = _row - 3 * _step
         self.brainlink_weights_label = DirectLabel(
             text=t("settings.bl_weights"),
-            text_scale=0.032,
+            text_scale=0.028,
             text_fg=(1, 1, 1, 1),
             frameColor=(0, 0, 0, 0),
-            pos=(-0.4, 0, -0.44),
-            parent=self.brainlink_frame,
+            pos=(-0.5, 0, _weights_z),
+            parent=parent,
             text_font=font,
             text_align=TextNode.ALeft,
         )
-
         self._brainlink_cached_weights = weights_str
-
         self.brainlink_weights_entry = DirectEntry(
-            parent=self.brainlink_frame,
-            scale=0.038,
-            pos=(0.05, 0, -0.44),
-            width=20,
+            parent=parent,
+            scale=0.032,
+            pos=(0.05, 0, _weights_z),
+            width=16,
             numLines=1,
             initialText=weights_str,
             entryFont=entry_font,
@@ -1002,48 +1065,593 @@ class MainMenuScene(BaseScene):
             focusOutCommand=self._brainlink_weights_focus_out,
         )
         self.brainlink_weights_entry.enterText(weights_str)
-
+        _apply_z = _weights_z - _step
         self.brainlink_apply_btn = DirectButton(
             text=t("settings.apply"),
-            text_scale=0.03,
-            text_fg=(1, 1, 1, 1),
+            text_scale=0.028,
             frameColor=(0.25, 0.4, 0.25, 1),
-            frameSize=(-0.08, 0.08, -0.04, 0.04),
-            pos=(0.48, 0, -0.40),
+            frameSize=(-0.1, 0.1, -0.03, 0.03),
+            pos=(0.38, 0, _apply_z),
             command=self._brainlink_apply_ml_config,
-            parent=self.brainlink_frame,
+            parent=parent,
             text_font=font,
-            relief=1,
-            borderWidth=(0.003, 0.003)
         )
 
-        # Load / Save model buttons
-        self.brainlink_load_model_btn = DirectButton(
-            text=t("settings.load_model"),
+    def _brainlink_populate_fault_grid(
+        self,
+        parent,
+        font,
+        entry_font,
+        entry_color,
+        values: dict,
+        defaults: dict,
+        entries_out: dict,
+        labels_out: dict,
+        cached_out: dict,
+        fault_label_keys: dict,
+        label_suffix: str,
+        top_z: float,
+        row_step: float = 0.044,
+        rows_per_col: int = 6,
+        entry_scale: float = 0.028,
+    ) -> float:
+        """Two-column fault grid (6+5 rows); returns lowest z used."""
+        lowest = top_z
+        for idx, field in enumerate(BRAINLINK_BASE_FAULT_FIELDS):
+            col = 0 if idx < rows_per_col else 1
+            row = idx if col == 0 else idx - rows_per_col
+            if col == 0:
+                x_lbl, x_entry = -0.50, -0.24
+            else:
+                x_lbl, x_entry = 0.02, 0.28
+            z_pos = top_z - row * row_step
+            lowest = min(lowest, z_pos)
+            lbl_key = fault_label_keys[field]
+            lbl = DirectLabel(
+                text=t(lbl_key) + label_suffix,
+                text_scale=0.023,
+                text_fg=(1, 1, 1, 1),
+                frameColor=(0, 0, 0, 0),
+                pos=(x_lbl, 0, z_pos),
+                parent=parent,
+                text_font=font,
+                text_align=TextNode.ALeft,
+            )
+            labels_out[field] = (lbl, lbl_key)
+            val = int(values.get(field, defaults[field]))
+            text = str(val)
+            entry = DirectEntry(
+                parent=parent,
+                scale=entry_scale,
+                pos=(x_entry, 0, z_pos),
+                width=4,
+                numLines=1,
+                initialText=text,
+                entryFont=entry_font,
+                frameColor=entry_color,
+                borderWidth=(0.006, 0.006),
+                focus=0,
+            )
+            entry.enterText(text)
+            entries_out[field] = entry
+            cached_out[field] = text
+        return lowest
+
+    def _create_brainlink_tab(self, font):
+        """Create BrainLink settings content (standalone panel)."""
+        self.brainlink_frame = DirectFrame(
+            frameColor=(0, 0, 0, 0),
+            frameSize=(-0.58, 0.58, -0.52, 0.38),
+            pos=(0, 0, 0.0),
+            parent=self.brainlink_settings_frame
+        )
+
+        bl_config = {}
+        if hasattr(self.base, "game_config"):
+            bl_config = self.base.game_config.get("brainlink", {})
+        prediction_mode = bl_config.get("prediction_mode", "base")
+        if prediction_mode not in ("base", "ml"):
+            prediction_mode = "base"
+
+        entry_font = DGG.getDefaultFont()
+        _entry_color = (0.28, 0.32, 0.45, 1)
+        _chk_size = (-0.04, 0.04, -0.03, 0.03)
+        z_mode = 0.34
+        z_chk = (0.28, 0.23, 0.18)
+        z_content = 0.11
+
+        self.brainlink_mode_label = DirectLabel(
+            text=t("settings.bl_prediction_mode"),
             text_scale=0.03,
             text_fg=(1, 1, 1, 1),
-            frameColor=(0.25, 0.25, 0.4, 1),
-            frameSize=(-0.12, 0.12, -0.04, 0.04),
-            pos=(-0.2, 0, -0.52),
-            command=self._brainlink_load_model,
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.5, 0, z_mode),
             parent=self.brainlink_frame,
             text_font=font,
-            relief=1,
-            borderWidth=(0.003, 0.003)
+            text_align=TextNode.ALeft,
+        )
+        active_mode = (0.3, 0.5, 0.35, 1)
+        idle_mode = (0.25, 0.25, 0.35, 1)
+        self.brainlink_mode_base_btn = DirectButton(
+            text=t("settings.bl_mode_base"),
+            text_scale=0.026,
+            frameColor=active_mode if prediction_mode == "base" else idle_mode,
+            frameSize=(-0.09, 0.09, -0.03, 0.03),
+            pos=(-0.08, 0, z_mode),
+            command=self._brainlink_set_mode,
+            extraArgs=["base"],
+            parent=self.brainlink_frame,
+            text_font=font,
+        )
+        self.brainlink_mode_ml_btn = DirectButton(
+            text=t("settings.bl_mode_ml"),
+            text_scale=0.026,
+            frameColor=active_mode if prediction_mode == "ml" else idle_mode,
+            frameSize=(-0.09, 0.09, -0.03, 0.03),
+            pos=(0.12, 0, z_mode),
+            command=self._brainlink_set_mode,
+            extraArgs=["ml"],
+            parent=self.brainlink_frame,
+            text_font=font,
+        )
+
+        settings = [
+            ("settings.bl_send_keyboard", "send_keyboard_events", z_chk[0], bl_config.get("send_keyboard_events", True)),
+            ("settings.bl_send_history", "send_to_history", z_chk[1], bl_config.get("send_to_history", True)),
+            ("settings.bl_send_ml", "send_to_ml", z_chk[1], bl_config.get("send_to_ml", True)),
+            ("settings.bl_send_events", "send_brainlink_events", z_chk[2], bl_config.get("send_brainlink_events", True)),
+        ]
+        self.brainlink_checkboxes = {}
+        self.brainlink_setting_labels = {}
+        for label_key, key, z_pos, default_value in settings:
+            lbl = DirectLabel(
+                text=t(label_key) + ":",
+                text_scale=0.026,
+                text_fg=(1, 1, 1, 1),
+                frameColor=(0, 0, 0, 0),
+                pos=(-0.5, 0, z_pos),
+                parent=self.brainlink_frame,
+                text_font=font,
+                text_align=TextNode.ALeft,
+            )
+            self.brainlink_setting_labels[key] = (lbl, label_key)
+            checkbox = DirectButton(
+                text="+" if default_value else "",
+                text_scale=0.04,
+                text_fg=(0.9, 1, 0.9, 1) if default_value else (0.5, 0.5, 0.5, 1),
+                frameColor=(0.15, 0.4, 0.2, 1) if default_value else (0.22, 0.22, 0.28, 1),
+                frameSize=_chk_size,
+                pos=(0.38, 0, z_pos),
+                command=self._toggle_brainlink_setting,
+                extraArgs=[key],
+                parent=self.brainlink_frame,
+                text_font=font,
+                relief=2,
+                borderWidth=(0.008, 0.008),
+            )
+            self.brainlink_checkboxes[key] = checkbox
+
+        self.brainlink_base_panel = DirectFrame(
+            frameColor=(0, 0, 0, 0),
+            frameSize=(-0.58, 0.58, -0.55, 0.02),
+            pos=(0, 0, z_content),
+            parent=self.brainlink_frame,
+        )
+        self.brainlink_base_fault_title = DirectLabel(
+            text=t("settings.bl_base_fault_title"),
+            text_scale=0.026,
+            text_fg=(0.85, 0.9, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.50, 0, 0.02),
+            parent=self.brainlink_base_panel,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        base_fault = dict(DEFAULT_BASE_FAULT)
+        base_fault.update(bl_config.get("base_fault") or {})
+        self.brainlink_fault_entries = {}
+        self.brainlink_fault_labels = {}
+        self._brainlink_cached_fault = {}
+        fault_label_keys = {f: f"settings.bl_fault_{f}" for f in BRAINLINK_BASE_FAULT_FIELDS}
+        _base_bottom = self._brainlink_populate_fault_grid(
+            self.brainlink_base_panel,
+            font,
+            entry_font,
+            _entry_color,
+            base_fault,
+            DEFAULT_BASE_FAULT,
+            self.brainlink_fault_entries,
+            self.brainlink_fault_labels,
+            self._brainlink_cached_fault,
+            fault_label_keys,
+            "",
+            top_z=-0.03,
+        )
+
+        multi_fault = dict(DEFAULT_MULTI_FAULT)
+        multi_fault.update(bl_config.get("multi_fault") or {})
+        multi_count = int(bl_config.get("multi_count", DEFAULT_MULTI_COUNT) or DEFAULT_MULTI_COUNT)
+        _multi_title_z = _base_bottom - 0.048
+        self.brainlink_multi_fault_title = DirectLabel(
+            text=t("settings.bl_multi_fault_title"),
+            text_scale=0.024,
+            text_fg=(0.85, 0.9, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.50, 0, _multi_title_z),
+            parent=self.brainlink_base_panel,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        self.brainlink_multi_fault_entries = {}
+        self.brainlink_multi_fault_labels = {}
+        self._brainlink_cached_multi_fault = {}
+        _multi_bottom = self._brainlink_populate_fault_grid(
+            self.brainlink_base_panel,
+            font,
+            entry_font,
+            _entry_color,
+            multi_fault,
+            DEFAULT_MULTI_FAULT,
+            self.brainlink_multi_fault_entries,
+            self.brainlink_multi_fault_labels,
+            self._brainlink_cached_multi_fault,
+            fault_label_keys,
+            " ×",
+            top_z=_multi_title_z - 0.04,
+        )
+
+        _multi_count_z = _multi_bottom - 0.044
+        self.brainlink_multi_count_label = DirectLabel(
+            text=t("settings.bl_multi_count"),
+            text_scale=0.022,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.50, 0, _multi_count_z),
+            parent=self.brainlink_base_panel,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        self.brainlink_multi_count_entry = DirectEntry(
+            parent=self.brainlink_base_panel,
+            scale=0.028,
+            pos=(-0.24, 0, _multi_count_z),
+            width=4,
+            numLines=1,
+            initialText=str(max(1, multi_count)),
+            entryFont=entry_font,
+            frameColor=_entry_color,
+            borderWidth=(0.005, 0.005),
+            focus=0,
+        )
+        self.brainlink_multi_count_entry.enterText(str(max(1, multi_count)))
+        self._brainlink_cached_multi_count = str(max(1, multi_count))
+
+        self.brainlink_apply_fault_btn = DirectButton(
+            text=t("settings.bl_apply_base_fault"),
+            text_scale=0.022,
+            frameColor=(0.25, 0.4, 0.25, 1),
+            frameSize=(-0.22, 0.22, -0.03, 0.03),
+            pos=(0.0, 0, _multi_count_z - 0.058),
+            command=self._brainlink_apply_base_fault,
+            parent=self.brainlink_base_panel,
+            text_font=font,
+        )
+
+        self.brainlink_ml_panel = DirectFrame(
+            frameColor=(0, 0, 0, 0),
+            frameSize=(-0.58, 0.58, -0.52, 0.02),
+            pos=(0, 0, z_content),
+            parent=self.brainlink_frame,
+        )
+
+        model_path = bl_config.get("model_path") or "—"
+        history_path = bl_config.get("history_path") or "—"
+        _ml_path_z = 0.02
+        self.brainlink_model_path_label = DirectLabel(
+            text=t("settings.bl_model_path") + " " + self._brainlink_short_path(model_path),
+            text_scale=0.02,
+            text_fg=(0.75, 0.8, 0.9, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.5, 0, _ml_path_z),
+            parent=self.brainlink_ml_panel,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        self.brainlink_history_path_label = DirectLabel(
+            text=t("settings.bl_history_path") + " " + self._brainlink_short_path(history_path),
+            text_scale=0.02,
+            text_fg=(0.75, 0.8, 0.9, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.5, 0, _ml_path_z - 0.038),
+            parent=self.brainlink_ml_panel,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+
+        _ml_btn_z1 = _ml_path_z - 0.09
+        _ml_btn_z2 = _ml_btn_z1 - 0.055
+        _ml_btn_w = 0.2
+        _ml_btn_h = 0.028
+        _ml_btn_frame = (-_ml_btn_w, _ml_btn_w, -_ml_btn_h, _ml_btn_h)
+        self.brainlink_load_model_btn = DirectButton(
+            text=t("settings.load_model"),
+            text_scale=0.022,
+            frameColor=(0.25, 0.25, 0.4, 1),
+            frameSize=_ml_btn_frame,
+            pos=(-0.26, 0, _ml_btn_z1),
+            command=self._brainlink_load_model,
+            parent=self.brainlink_ml_panel,
+            text_font=font,
         )
         self.brainlink_save_model_btn = DirectButton(
             text=t("settings.save_model"),
-            text_scale=0.03,
-            text_fg=(1, 1, 1, 1),
+            text_scale=0.022,
             frameColor=(0.25, 0.4, 0.25, 1),
-            frameSize=(-0.12, 0.12, -0.04, 0.04),
-            pos=(0.2, 0, -0.52),
+            frameSize=_ml_btn_frame,
+            pos=(0.26, 0, _ml_btn_z1),
             command=self._brainlink_save_model,
+            parent=self.brainlink_ml_panel,
+            text_font=font,
+        )
+        self.brainlink_reset_model_btn = DirectButton(
+            text=t("settings.reset_model"),
+            text_scale=0.022,
+            frameColor=(0.45, 0.25, 0.25, 1),
+            frameSize=_ml_btn_frame,
+            pos=(-0.26, 0, _ml_btn_z2),
+            command=self._brainlink_reset_model,
+            parent=self.brainlink_ml_panel,
+            text_font=font,
+        )
+        self.brainlink_load_history_btn = DirectButton(
+            text=t("settings.load_history"),
+            text_scale=0.022,
+            frameColor=(0.25, 0.25, 0.4, 1),
+            frameSize=_ml_btn_frame,
+            pos=(0.26, 0, _ml_btn_z2),
+            command=self._brainlink_load_history,
+            parent=self.brainlink_ml_panel,
+            text_font=font,
+        )
+
+        self.brainlink_command_status = DirectLabel(
+            text="",
+            text_scale=0.022,
+            text_fg=(0.7, 0.85, 0.7, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.5, 0, -0.50),
             parent=self.brainlink_frame,
             text_font=font,
-            relief=1,
-            borderWidth=(0.003, 0.003)
+            text_align=TextNode.ALeft,
         )
+
+        self._brainlink_prediction_mode = prediction_mode
+        self._update_brainlink_mode_ui()
+        self._brainlink_layout_close_button()
+
+    def _brainlink_layout_close_button(self):
+        """Keep Close button just below the active settings block; trim panel height."""
+        close = getattr(self, "brainlink_settings_close_btn", None)
+        if not close:
+            return
+        frame = getattr(self, "brainlink_frame", None)
+        mode = getattr(self, "_brainlink_prediction_mode", "base")
+        content_bottom = -0.48
+        if frame:
+            if mode == "base":
+                panel = getattr(self, "brainlink_base_panel", None)
+                apply_btn = getattr(self, "brainlink_apply_fault_btn", None)
+                if panel and apply_btn:
+                    content_bottom = (
+                        frame.getZ()
+                        + panel.getZ()
+                        + apply_btn.getZ()
+                        - 0.034
+                    )
+            elif hasattr(self, "brainlink_ml_panel"):
+                ml = self.brainlink_ml_panel
+                content_bottom = frame.getZ() + ml.getZ() - 0.14
+        close_gap = 0.042
+        close_half = 0.045
+        close_z = content_bottom - close_gap - close_half
+        close.setPos(0, 0, close_z)
+        settings_frame = getattr(self, "brainlink_settings_frame", None)
+        if settings_frame is not None:
+            settings_frame["frameSize"] = (-0.62, 0.62, close_z - close_half - 0.02, 0.52)
+
+    def _brainlink_short_path(self, path: str, max_len: int = 42) -> str:
+        if not path or path == "—":
+            return "—"
+        s = str(path)
+        return s if len(s) <= max_len else "…" + s[-(max_len - 1):]
+
+    def _brainlink_ensure_client_config_path(self):
+        config_path = Path("config/game_config.json").resolve()
+        brainlink_dir = Path(os.environ.get("APPDATA", os.path.expanduser("~"))) / "BrainLink"
+        brainlink_dir.mkdir(parents=True, exist_ok=True)
+        (brainlink_dir / "game_config_path.txt").write_text(str(config_path), encoding="utf-8")
+
+    def _brainlink_set_status(self, message: str, ok: bool = True):
+        if hasattr(self, "brainlink_command_status"):
+            self.brainlink_command_status["text"] = message
+            self.brainlink_command_status["text_fg"] = (0.7, 0.9, 0.7, 1) if ok else (1, 0.6, 0.6, 1)
+
+    def _brainlink_get_client(self):
+        if not hasattr(self.base, "input_manager") or not self.base.input_manager:
+            return None
+        return getattr(self.base.input_manager, "brainlink", None)
+
+    def _brainlink_send_client_command(self, method_name: str) -> bool:
+        client = self._brainlink_get_client()
+        if not client or not client.is_connected():
+            self._brainlink_set_status(t("settings.bl_not_connected"), ok=False)
+            logger.warning(t("settings.bl_not_connected"))
+            return False
+        self._save_brainlink_config()
+        self._brainlink_ensure_client_config_path()
+        time.sleep(0.15)
+        send_fn = getattr(client, method_name, None)
+        if not send_fn:
+            self._brainlink_set_status(t("settings.bl_command_failed"), ok=False)
+            return False
+        if send_fn():
+            self._brainlink_set_status(t("settings.bl_command_sent"), ok=True)
+            return True
+        self._brainlink_set_status(t("settings.bl_command_failed"), ok=False)
+        return False
+
+    def _brainlink_set_mode(self, mode: str):
+        if mode not in ("base", "ml"):
+            return
+        if not hasattr(self.base, "game_config"):
+            return
+        bl_config = self.base.game_config.get("brainlink", {})
+        bl_config["prediction_mode"] = mode
+        self.base.game_config["brainlink"] = bl_config
+        self._brainlink_prediction_mode = mode
+        self._update_brainlink_mode_ui()
+        self._brainlink_send_client_command("send_set_prediction_mode_command")
+
+    def _update_brainlink_mode_ui(self):
+        mode = getattr(self, "_brainlink_prediction_mode", "base")
+        active = (0.3, 0.5, 0.35, 1)
+        idle = (0.25, 0.25, 0.35, 1)
+        if hasattr(self, "brainlink_mode_base_btn"):
+            self.brainlink_mode_base_btn["frameColor"] = active if mode == "base" else idle
+        if hasattr(self, "brainlink_mode_ml_btn"):
+            self.brainlink_mode_ml_btn["frameColor"] = active if mode == "ml" else idle
+        if hasattr(self, "brainlink_base_panel"):
+            if mode == "base":
+                self.brainlink_base_panel.show()
+            else:
+                self.brainlink_base_panel.hide()
+        if hasattr(self, "brainlink_ml_panel"):
+            if mode == "ml":
+                self.brainlink_ml_panel.show()
+            else:
+                self.brainlink_ml_panel.hide()
+        for key in ("send_to_history",):
+            for widget_key in (key,):
+                lbl = self.brainlink_setting_labels.get(widget_key)
+                cb = self.brainlink_checkboxes.get(widget_key)
+                show = mode == "base"
+                if lbl:
+                    lbl[0].show() if show else lbl[0].hide()
+                if cb:
+                    cb.show() if show else cb.hide()
+        for key in ("send_to_ml",):
+            lbl = self.brainlink_setting_labels.get(key)
+            cb = self.brainlink_checkboxes.get(key)
+            show = mode == "ml"
+            if lbl:
+                lbl[0].show() if show else lbl[0].hide()
+            if cb:
+                cb.show() if show else cb.hide()
+        self._brainlink_layout_close_button()
+
+    def _brainlink_collect_fault_from_entries(
+        self,
+        entries: dict,
+        defaults: dict,
+        cached: dict,
+    ) -> dict:
+        fault = dict(defaults)
+        for field, entry in entries.items():
+            text = entry.get(plain=True).strip()
+            try:
+                fault[field] = int(text)
+                entry.enterText(str(fault[field]))
+                cached[field] = str(fault[field])
+            except (ValueError, TypeError):
+                fallback = fault.get(field, defaults[field])
+                entry.enterText(str(fallback))
+                fault[field] = int(fallback)
+                cached[field] = str(fallback)
+        return fault
+
+    def _brainlink_collect_base_fault_from_ui(self) -> dict:
+        bl_config = self.base.game_config.get("brainlink", {}) if hasattr(self.base, "game_config") else {}
+        fault = dict(DEFAULT_BASE_FAULT)
+        fault.update(bl_config.get("base_fault") or {})
+        cached = getattr(self, "_brainlink_cached_fault", {})
+        return self._brainlink_collect_fault_from_entries(
+            getattr(self, "brainlink_fault_entries", {}),
+            {**DEFAULT_BASE_FAULT, **fault},
+            cached,
+        )
+
+    def _brainlink_collect_multi_fault_from_ui(self) -> dict:
+        bl_config = self.base.game_config.get("brainlink", {}) if hasattr(self.base, "game_config") else {}
+        fault = dict(DEFAULT_MULTI_FAULT)
+        fault.update(bl_config.get("multi_fault") or {})
+        cached = getattr(self, "_brainlink_cached_multi_fault", {})
+        return self._brainlink_collect_fault_from_entries(
+            getattr(self, "brainlink_multi_fault_entries", {}),
+            {**DEFAULT_MULTI_FAULT, **fault},
+            cached,
+        )
+
+    def _brainlink_collect_multi_count_from_ui(self) -> int:
+        entry = getattr(self, "brainlink_multi_count_entry", None)
+        fallback = DEFAULT_MULTI_COUNT
+        if hasattr(self.base, "game_config"):
+            fallback = int(
+                self.base.game_config.get("brainlink", {}).get("multi_count", DEFAULT_MULTI_COUNT)
+                or DEFAULT_MULTI_COUNT
+            )
+        if not entry:
+            return max(1, fallback)
+        text = entry.get(plain=True).strip()
+        try:
+            val = max(1, int(text))
+            entry.enterText(str(val))
+            self._brainlink_cached_multi_count = str(val)
+            return val
+        except (ValueError, TypeError):
+            val = max(1, fallback)
+            entry.enterText(str(val))
+            self._brainlink_cached_multi_count = str(val)
+            return val
+
+    def _brainlink_apply_base_fault(self):
+        if not hasattr(self.base, "game_config"):
+            return
+        bl_config = self.base.game_config.get("brainlink", {})
+        bl_config["base_fault"] = self._brainlink_collect_base_fault_from_ui()
+        bl_config["multi_fault"] = self._brainlink_collect_multi_fault_from_ui()
+        bl_config["multi_count"] = self._brainlink_collect_multi_count_from_ui()
+        self.base.game_config["brainlink"] = bl_config
+        self._save_brainlink_config()
+        self._brainlink_send_client_command("send_apply_base_fault_command")
+
+    def _brainlink_refresh_path_labels(self):
+        bl_config = getattr(self.base, "game_config", {}).get("brainlink", {})
+        if hasattr(self, "brainlink_model_path_label"):
+            mp = bl_config.get("model_path") or "—"
+            self.brainlink_model_path_label["text"] = t("settings.bl_model_path") + " " + self._brainlink_short_path(mp)
+        if hasattr(self, "brainlink_history_path_label"):
+            hp = bl_config.get("history_path") or "—"
+            self.brainlink_history_path_label["text"] = t("settings.bl_history_path") + " " + self._brainlink_short_path(hp)
+
+    def _brainlink_reset_model(self):
+        self._brainlink_send_client_command("send_reset_model_command")
+
+    def _brainlink_load_history(self):
+        root = tk.Tk()
+        root.withdraw()
+        path = filedialog.askopenfilename(
+            title=t("settings.load_history"),
+            filetypes=[("JSON history", "*.json"), ("All files", "*.*")],
+        )
+        root.destroy()
+        if not path or not hasattr(self.base, "game_config"):
+            return
+        path_abs = str(Path(path).resolve())
+        bl_config = self.base.game_config.get("brainlink", {})
+        bl_config["history_path"] = path_abs
+        self.base.game_config["brainlink"] = bl_config
+        self._brainlink_refresh_path_labels()
+        self._brainlink_send_client_command("send_load_history_command")
     
     def _brainlink_entry_focus_in(self, key):
         """Only one BrainLink field receives keyboard input at a time."""
@@ -1134,23 +1742,56 @@ class MainMenuScene(BaseScene):
             self.brainlink_weights_entry.enterText(restored)
             self._brainlink_cached_weights = restored
 
-    def _refresh_brainlink_entries_from_config(self):
-        """Reload BrainLink input fields from current game config."""
-        if not hasattr(self, "brainlink_entries") or not hasattr(self.base, "game_config"):
+    def _refresh_brainlink_fault_ui_from_config(self):
+        """Reload Base / Multi fault fields and multi_count from game config."""
+        if not hasattr(self.base, "game_config"):
             return
         bl_config = self.base.game_config.get("brainlink", {})
-        if not hasattr(self, "_brainlink_cached_values"):
-            self._brainlink_cached_values = {}
-        for key, meta in self.brainlink_entries.items():
-            val = bl_config.get(key, meta["default"])
-            formatted = meta["fmt"](val)
-            meta["entry"].enterText(formatted)
-            self._brainlink_cached_values[key] = formatted
-        weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
-        weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
-        if hasattr(self, "brainlink_weights_entry"):
-            self.brainlink_weights_entry.enterText(weights_str)
-            self._brainlink_cached_weights = weights_str
+        base_fault = dict(DEFAULT_BASE_FAULT)
+        base_fault.update(bl_config.get("base_fault") or {})
+        for field, entry in getattr(self, "brainlink_fault_entries", {}).items():
+            val = int(base_fault.get(field, DEFAULT_BASE_FAULT[field]))
+            text = str(val)
+            entry.enterText(text)
+            if hasattr(self, "_brainlink_cached_fault"):
+                self._brainlink_cached_fault[field] = text
+        multi_fault = dict(DEFAULT_MULTI_FAULT)
+        multi_fault.update(bl_config.get("multi_fault") or {})
+        for field, entry in getattr(self, "brainlink_multi_fault_entries", {}).items():
+            val = int(multi_fault.get(field, DEFAULT_MULTI_FAULT[field]))
+            text = str(val)
+            entry.enterText(text)
+            if hasattr(self, "_brainlink_cached_multi_fault"):
+                self._brainlink_cached_multi_fault[field] = text
+        multi_count = max(1, int(bl_config.get("multi_count", DEFAULT_MULTI_COUNT) or DEFAULT_MULTI_COUNT))
+        if hasattr(self, "brainlink_multi_count_entry"):
+            self.brainlink_multi_count_entry.enterText(str(multi_count))
+            self._brainlink_cached_multi_count = str(multi_count)
+
+    def _refresh_brainlink_entries_from_config(self):
+        """Reload BrainLink input fields from current game config."""
+        if not hasattr(self.base, "game_config"):
+            return
+        bl_config = self.base.game_config.get("brainlink", {})
+        if hasattr(self, "brainlink_entries"):
+            if not hasattr(self, "_brainlink_cached_values"):
+                self._brainlink_cached_values = {}
+            for key, meta in self.brainlink_entries.items():
+                val = bl_config.get(key, meta["default"])
+                formatted = meta["fmt"](val)
+                meta["entry"].enterText(formatted)
+                self._brainlink_cached_values[key] = formatted
+            weights = bl_config.get("prediction_weights", [1.0, 1.0, 1.0, 1.0])
+            weights_str = ", ".join(str(round(w, 2)) for w in (weights + [1.0] * 4)[:4])
+            if hasattr(self, "brainlink_weights_entry"):
+                self.brainlink_weights_entry.enterText(weights_str)
+                self._brainlink_cached_weights = weights_str
+            mode = bl_config.get("prediction_mode", "base")
+            if mode not in ("base", "ml"):
+                mode = "base"
+            self._brainlink_prediction_mode = mode
+        self._refresh_brainlink_fault_ui_from_config()
+        self._brainlink_refresh_path_labels()
 
     def _brainlink_apply_ml_config(self, *args, **kwargs):
         """Read all BrainLink input fields from cache, validate, save."""
@@ -1208,57 +1849,43 @@ class MainMenuScene(BaseScene):
             logger.info("BrainLink ML config applied")
     
     def _brainlink_load_model(self):
-        """Open file dialog to choose model file; save path to config."""
+        """Choose model file, save path to config, command client to load."""
         root = tk.Tk()
         root.withdraw()
         path = filedialog.askopenfilename(
-            title="Load ML model",
-            filetypes=[("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")]
+            title=t("settings.load_model"),
+            filetypes=[("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")],
         )
         root.destroy()
-        if path:
-            if not hasattr(self.base, 'game_config'):
-                return
-            bl_config = self.base.game_config.get("brainlink", {})
-            bl_config["model_path"] = path
-            self.base.game_config["brainlink"] = bl_config
-            self._save_brainlink_config()
-            logger.info(f"BrainLink model path set (load): {path}")
-    
+        if not path or not hasattr(self.base, "game_config"):
+            return
+        path_abs = str(Path(path).resolve())
+        bl_config = self.base.game_config.get("brainlink", {})
+        bl_config["model_path"] = path_abs
+        self.base.game_config["brainlink"] = bl_config
+        self._brainlink_refresh_path_labels()
+        self._brainlink_send_client_command("send_load_model_command")
+        logger.info("BrainLink model path set (load): %s", path_abs)
+
     def _brainlink_save_model(self):
-        """Open file dialog to choose save location; save path to config; ask BrainLink to save model."""
+        """Choose save path, write config, command client to save model."""
         root = tk.Tk()
         root.withdraw()
         path = filedialog.asksaveasfilename(
-            title="Save ML model",
+            title=t("settings.save_model"),
             defaultextension=".pkl",
-            filetypes=[("Pickle model", "*.pkl"), ("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")]
+            filetypes=[("Pickle model", "*.pkl"), ("Model files", "*.pkl *.joblib *.pt *.onnx"), ("All files", "*.*")],
         )
         root.destroy()
-        if path:
-            if not hasattr(self.base, 'game_config'):
-                return
-            # Use absolute path so BrainLink Client can save to the same path
-            path_abs = str(Path(path).resolve())
-            bl_config = self.base.game_config.get("brainlink", {})
-            bl_config["model_path"] = path_abs
-            self.base.game_config["brainlink"] = bl_config
-            self._save_brainlink_config()
-            logger.info(f"BrainLink model path set (save): {path_abs}")
-            # Записать путь к game_config.json в известный файл, чтобы BrainLink мог прочитать конфиг даже без --game-config
-            _game_config_path = Path("config/game_config.json").resolve()
-            _brainlink_config_dir = Path(os.environ.get("APPDATA", os.path.expanduser("~"))) / "BrainLink"
-            _brainlink_config_dir.mkdir(parents=True, exist_ok=True)
-            (_brainlink_config_dir / "game_config_path.txt").write_text(str(_game_config_path), encoding="utf-8")
-            # Ensure config is written to disk before client reads it
-            time.sleep(0.15)
-            if hasattr(self.base, 'input_manager') and self.base.input_manager.brainlink and self.base.input_manager.brainlink.is_connected():
-                if self.base.input_manager.brainlink.send_save_model_command():
-                    logger.info("Sent save model command to BrainLink Client")
-                else:
-                    logger.warning("Could not send save model command (BrainLink busy or not connected)")
-            else:
-                logger.warning("BrainLink not connected — start BrainLink Client to save the model.")
+        if not path or not hasattr(self.base, "game_config"):
+            return
+        path_abs = str(Path(path).resolve())
+        bl_config = self.base.game_config.get("brainlink", {})
+        bl_config["model_path"] = path_abs
+        self.base.game_config["brainlink"] = bl_config
+        self._brainlink_refresh_path_labels()
+        self._brainlink_send_client_command("send_save_model_command")
+        logger.info("BrainLink model path set (save): %s", path_abs)
     
     def _switch_settings_tab(self, tab_id: str):
         """Switch between settings tabs"""
@@ -1267,7 +1894,8 @@ class MainMenuScene(BaseScene):
         # Hide all frames
         self.resolution_frame.hide()
         self.controls_frame.hide()
-        self.brainlink_frame.hide()
+        if hasattr(self, "brainlink_general_frame"):
+            self.brainlink_general_frame.hide()
         
         # Reset all tab button colors
         for tab_id_key, btn in self.settings_tabs.items():
@@ -1282,7 +1910,7 @@ class MainMenuScene(BaseScene):
             self.controls_frame.show()
             self.settings_tabs["controls"]['frameColor'] = (0.3, 0.3, 0.5, 1)
         elif tab_id == "brainlink":
-            self.brainlink_frame.show()
+            self.brainlink_general_frame.show()
             self.settings_tabs["brainlink"]['frameColor'] = (0.3, 0.3, 0.5, 1)
             self._refresh_brainlink_entries_from_config()
     
@@ -1375,11 +2003,17 @@ class MainMenuScene(BaseScene):
         self.play_btn["text"] = t("menu.play")
         self.player_name_label["text"] = t("menu.player") + ":"
         self.settings_btn["text"] = t("menu.config")
+        if hasattr(self, "brainlink_settings_btn"):
+            self.brainlink_settings_btn["text"] = t("menu.brainlink_settings")
         self.quit_btn["text"] = t("menu.quit")
         self.back_to_game_btn["text"] = t("menu.back_to_game")
         self.controls_text.setText(t("menu.controls_hint"))
         self.settings_title["text"] = t("settings.title")
         self.settings_close_btn["text"] = t("settings.close")
+        if hasattr(self, "brainlink_settings_title"):
+            self.brainlink_settings_title["text"] = t("settings.brainlink_title")
+        if hasattr(self, "brainlink_settings_close_btn"):
+            self.brainlink_settings_close_btn["text"] = t("settings.close")
         for tab_id, btn in getattr(self, "settings_tabs", {}).items():
             key = getattr(self, "_tab_label_keys", {}).get(tab_id)
             if key:
@@ -1416,6 +2050,30 @@ class MainMenuScene(BaseScene):
             self.brainlink_load_model_btn["text"] = t("settings.load_model")
         if hasattr(self, "brainlink_save_model_btn"):
             self.brainlink_save_model_btn["text"] = t("settings.save_model")
+        if hasattr(self, "brainlink_reset_model_btn"):
+            self.brainlink_reset_model_btn["text"] = t("settings.reset_model")
+        if hasattr(self, "brainlink_load_history_btn"):
+            self.brainlink_load_history_btn["text"] = t("settings.load_history")
+        if hasattr(self, "brainlink_mode_label"):
+            self.brainlink_mode_label["text"] = t("settings.bl_prediction_mode")
+        if hasattr(self, "brainlink_mode_base_btn"):
+            self.brainlink_mode_base_btn["text"] = t("settings.bl_mode_base")
+        if hasattr(self, "brainlink_mode_ml_btn"):
+            self.brainlink_mode_ml_btn["text"] = t("settings.bl_mode_ml")
+        if hasattr(self, "brainlink_base_fault_title"):
+            self.brainlink_base_fault_title["text"] = t("settings.bl_base_fault_title")
+        if hasattr(self, "brainlink_multi_fault_title"):
+            self.brainlink_multi_fault_title["text"] = t("settings.bl_multi_fault_title")
+        if hasattr(self, "brainlink_multi_count_label"):
+            self.brainlink_multi_count_label["text"] = t("settings.bl_multi_count")
+        if hasattr(self, "brainlink_apply_fault_btn"):
+            self.brainlink_apply_fault_btn["text"] = t("settings.bl_apply_base_fault")
+        for field, (lbl, lbl_key) in getattr(self, "brainlink_fault_labels", {}).items():
+            lbl["text"] = t(lbl_key)
+        for field, (lbl, lbl_key) in getattr(self, "brainlink_multi_fault_labels", {}).items():
+            lbl["text"] = t(lbl_key) + " ×"
+        self._brainlink_refresh_path_labels()
+        self._update_brainlink_mode_ui()
     
     def _save_brainlink_config(self):
         """Save BrainLink config to game_config.json"""
@@ -1441,52 +2099,100 @@ class MainMenuScene(BaseScene):
                 config["window"] = self.base.game_config["window"]
             if "locale" in self.base.game_config:
                 config["locale"] = self.base.game_config["locale"]
-            with open(config_path, "w", encoding="utf-8") as f:
+            tmp_path = config_path.with_suffix(".json.tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
+            tmp_path.replace(config_path)
             logger.info(f"Saved game config to {config_path}")
         except Exception as e:
             logger.error(f"Failed to save game config: {e}")
 
     def _on_settings_clicked(self):
-        """Toggle settings panel visibility"""
-        if self.settings_frame.isHidden():
-            self.settings_frame.show()
-            self._refresh_brainlink_entries_from_config()
-            self._refresh_resolution_ui()
-            # Hide main menu UI when settings are open to prevent overlap
-            self.play_btn.hide()
-            self.back_to_game_btn.hide()
-            self.settings_btn.hide()
-            self.quit_btn.hide()
-            self.controls_text.hide()
-            if hasattr(self, "player_name_label"):
-                self.player_name_label.hide()
-            if hasattr(self, "player_name_entry"):
-                self.player_name_entry.hide()
-            if hasattr(self, "status_frame"):
-                self.status_frame.hide()
-            self.title.hide()
-            self.subtitle.hide()
-        else:
+        """Toggle general settings (resolution / controls)."""
+        self._toggle_settings_panel()
+
+    def _on_brainlink_settings_clicked(self):
+        """Toggle standalone BrainLink settings screen."""
+        self._toggle_brainlink_settings_panel()
+
+    def _hide_main_menu_for_settings(self):
+        self.play_btn.hide()
+        self.back_to_game_btn.hide()
+        self.settings_btn.hide()
+        if hasattr(self, "brainlink_settings_btn"):
+            self.brainlink_settings_btn.hide()
+        self.quit_btn.hide()
+        self.controls_text.hide()
+        if hasattr(self, "player_name_label"):
+            self.player_name_label.hide()
+        if hasattr(self, "player_name_entry"):
+            self.player_name_entry.hide()
+        if hasattr(self, "status_frame"):
+            self.status_frame.hide()
+        self.title.hide()
+        self.subtitle.hide()
+
+    def _show_main_menu_after_settings(self):
+        if getattr(self.base, "_from_pause_settings", False):
+            if hasattr(self.base, "_return_from_settings_to_game"):
+                self.base._return_from_settings_to_game()
+            return
+        self._update_from_pause_buttons()
+        self.settings_btn.show()
+        if hasattr(self, "brainlink_settings_btn"):
+            self.brainlink_settings_btn.show()
+        self.quit_btn.show()
+        self.controls_text.show()
+        if hasattr(self, "player_name_label"):
+            self.player_name_label.show()
+        if hasattr(self, "player_name_entry"):
+            self.player_name_entry.show()
+        if hasattr(self, "status_frame"):
+            self.status_frame.show()
+        self.title.show()
+        self.subtitle.show()
+
+    def _close_settings_panel(self):
+        if hasattr(self, "brainlink_entries"):
             self._brainlink_apply_ml_config()
+        self.settings_frame.hide()
+        self._show_main_menu_after_settings()
+
+    def _close_brainlink_settings_panel(self):
+        self.brainlink_settings_frame.hide()
+        self._show_main_menu_after_settings()
+
+    def _open_settings_panel(self, tab_id: str = "resolution"):
+        """Open general settings (resolution / controls)."""
+        if hasattr(self, "brainlink_settings_frame") and not self.brainlink_settings_frame.isHidden():
+            self.brainlink_settings_frame.hide()
+        self.settings_frame.show()
+        self._switch_settings_tab(tab_id)
+        self._refresh_resolution_ui()
+        self._hide_main_menu_for_settings()
+
+    def _open_brainlink_settings_panel(self):
+        """Open standalone BrainLink settings."""
+        if not self.settings_frame.isHidden():
             self.settings_frame.hide()
-            # If we came from pause, return to game; else show main menu buttons
-            if getattr(self.base, "_from_pause_settings", False):
-                if hasattr(self.base, "_return_from_settings_to_game"):
-                    self.base._return_from_settings_to_game()
-                return
-            self._update_from_pause_buttons()
-            self.settings_btn.show()
-            self.quit_btn.show()
-            self.controls_text.show()
-            if hasattr(self, "player_name_label"):
-                self.player_name_label.show()
-            if hasattr(self, "player_name_entry"):
-                self.player_name_entry.show()
-            if hasattr(self, "status_frame"):
-                self.status_frame.show()
-            self.title.show()
-            self.subtitle.show()
+        self.brainlink_settings_frame.show()
+        sync_brainlink_config_from_client(self.base)
+        self._refresh_brainlink_entries_from_config()
+        self._update_brainlink_mode_ui()
+        self._brainlink_refresh_path_labels()
+        self._hide_main_menu_for_settings()
+
+    def _toggle_settings_panel(self):
+        if not self.settings_frame.isHidden():
+            self._close_settings_panel()
+            return
+        self._open_settings_panel("resolution")
+
+    def _toggle_brainlink_settings_panel(self):
+        if not self.brainlink_settings_frame.isHidden():
+            self._close_brainlink_settings_panel()
+            return
+        self._open_brainlink_settings_panel()
 
     def _apply_resolution(self, width: int, height: int, fullscreen: bool):
         """Apply resolution via Game.apply_resolution"""

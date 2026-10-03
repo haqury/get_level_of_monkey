@@ -330,37 +330,58 @@ class BrainLinkClient:
             logger.error(f"Error sending event for ML training: {e}")
             return False
     
-    def send_save_model_command(self) -> bool:
-        """
-        Ask BrainLink Client to save the ML model to the path from game config.
-        Client will re-read game_config.json brainlink.model_path and call save_model().
-        
-        Returns:
-            True if command sent successfully
-        """
+    def _send_config_command(self, command_type: int) -> bool:
+        """Send a config-driven command (types 3–9). Payload is read from game config by the client (except type 9)."""
         if not self.connected:
-            logger.warning("Cannot send save model: not connected to BrainLink")
+            logger.warning("Cannot send BrainLink command %s: not connected", command_type)
             return False
-        
         try:
             import time
             if self._read_int(self.COMMAND_PENDING) == 1:
                 time.sleep(0.002)
                 if self._read_int(self.COMMAND_PENDING) == 1:
-                    logger.debug("Previous command pending, skipping save model")
+                    logger.debug("Previous command pending, skipping command type %s", command_type)
                     return False
-            
-            self._write_int(self.COMMAND_TYPE, 3)  # 3 = save model to config path
+            if not hasattr(self, "_start_time"):
+                self._start_time = time.time()
+            relative_timestamp = int((time.time() - self._start_time) * 1000)
+            self._write_int(self.COMMAND_TYPE, command_type)
             self._write_int(self.COMMAND_EVENT_CODE, 0)
-            self._write_int(self.COMMAND_TIMESTAMP, 0)
+            self._write_int(self.COMMAND_TIMESTAMP, relative_timestamp)
             self._write_int(self.COMMAND_PENDING, 1)
-            
-            logger.info("Sent save model command to BrainLink Client")
+            logger.info("Sent BrainLink command type %s", command_type)
             return True
-            
         except Exception as e:
-            logger.error(f"Error sending save model command: {e}")
+            logger.error("Error sending BrainLink command type %s: %s", command_type, e)
             return False
+
+    def send_save_model_command(self) -> bool:
+        """COMMAND_TYPE 3: save ML model to brainlink.model_path in game config."""
+        return self._send_config_command(3)
+
+    def send_set_prediction_mode_command(self) -> bool:
+        """COMMAND_TYPE 4: apply brainlink.prediction_mode (base|ml)."""
+        return self._send_config_command(4)
+
+    def send_apply_base_fault_command(self) -> bool:
+        """COMMAND_TYPE 5: apply brainlink.base_fault in game config."""
+        return self._send_config_command(5)
+
+    def send_load_model_command(self) -> bool:
+        """COMMAND_TYPE 6: load model from brainlink.model_path."""
+        return self._send_config_command(6)
+
+    def send_reset_model_command(self) -> bool:
+        """COMMAND_TYPE 7: reset in-memory ML model in BrainLink Client."""
+        return self._send_config_command(7)
+
+    def send_load_history_command(self) -> bool:
+        """COMMAND_TYPE 8: load history from brainlink.history_path."""
+        return self._send_config_command(8)
+
+    def send_export_settings_command(self) -> bool:
+        """COMMAND_TYPE 9: client writes current settings to %APPDATA%\\BrainLink\\brainlink_export_for_game.json."""
+        return self._send_config_command(9)
 
 
 # Singleton instance

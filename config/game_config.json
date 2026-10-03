@@ -19,20 +19,50 @@
     "enabled": true,
     "memory_name": "brainlink_data",
     "check_interval": 0.016,
+    "prediction_mode": "base",
     "send_keyboard_events": true,
     "send_to_history": true,
     "send_to_ml": true,
     "send_brainlink_events": true,
-    "confidence_threshold": 0.5,
-    "min_confidence": 0.2,
-    "full_confidence": 0.8,
+    "confidence_threshold": 0.6,
+    "min_confidence": 0.1,
+    "full_confidence": 0.4,
     "prediction_weights": [
+      1.0,
       1.0,
       1.0,
       1.0,
       1.0
     ],
-    "model_path": "C:\\BLconfig\\111.pkl"
+    "model_path": "C:\\Users\\haqury\\PycharmProjects\\BrainLinkClient\\models_ml\\brainlink_classifier.pkl",
+    "history_path": "C:\\BLconfig\\test.json",
+    "base_fault": {
+      "attention": 0,
+      "meditation": 0,
+      "signal": 0,
+      "delta": 10,
+      "theta": 10,
+      "low_alpha": 10,
+      "high_alpha": 10,
+      "low_beta": 10,
+      "high_beta": 10,
+      "low_gamma": 10,
+      "high_gamma": 10
+    },
+    "multi_fault": {
+      "attention": 1,
+      "meditation": 1,
+      "signal": 0,
+      "delta": 3,
+      "theta": 3,
+      "low_alpha": 3,
+      "high_alpha": 3,
+      "low_beta": 3,
+      "high_beta": 3,
+      "low_gamma": 3,
+      "high_gamma": 3
+    },
+    "multi_count": 8
   },
   "controls": {
     "keyboard": {

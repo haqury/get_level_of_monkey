@@ -27,7 +27,7 @@ class PauseMenu:
 
         self.frame = DirectFrame(
             frameColor=(0.05, 0.05, 0.12, 0.92),
-            frameSize=(-0.45, 0.45, -0.55, 0.35),
+            frameSize=(-0.45, 0.45, -0.62, 0.35),
             pos=(0, 0, 0),
             borderWidth=(0.008, 0.008),
         )
@@ -50,6 +50,7 @@ class PauseMenu:
             ("pause.restart", "restart"),
             ("pause.load", "load"),
             ("pause.settings", "settings"),
+            ("pause.brainlink_settings", "brainlink_settings"),
             ("pause.exit", "exit"),
         ]
         btn_h = 0.07
@@ -109,6 +110,8 @@ class PauseMenu:
             self.base.on_pause_load()
         elif key == "settings" and hasattr(self.base, "on_pause_settings"):
             self.base.on_pause_settings()
+        elif key == "brainlink_settings" and hasattr(self.base, "on_pause_brainlink_settings"):
+            self.base.on_pause_brainlink_settings()
         elif key == "exit" and hasattr(self.base, "on_pause_exit"):
             self.base.on_pause_exit()
 
