@@ -24,11 +24,10 @@
     "send_to_history": true,
     "send_to_ml": true,
     "send_brainlink_events": true,
-    "confidence_threshold": 0.6,
+    "confidence_threshold": 0.1,
     "min_confidence": 0.1,
     "full_confidence": 0.4,
     "prediction_weights": [
-      1.0,
       1.0,
       1.0,
       1.0,
@@ -74,5 +73,12 @@
       "sit_pause": "p"
     }
   },
-  "locale": "ru"
+  "locale": "ru",
+  "multiplayer": {
+    "enabled": true,
+    "default_port": 17777,
+    "tick_rate_hz": 20,
+    "connect_timeout_sec": 10,
+    "minigame_sync_hz": 10
+  }
 }

@@ -26,6 +26,7 @@ from src.ui.pause_menu import PauseMenu
 from src.services.brainlink_launcher import BrainLinkLauncher
 from src.services.save_system import SaveSystem
 from src.core.i18n import load_locale, t, resolve_dialog
+from src.network.controller import MultiplayerController
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,9 @@ class Game(ShowBase):
         
         # Save system
         self.save_system = SaveSystem()
+
+        # Multiplayer (host / client / offline)
+        self.multiplayer = MultiplayerController(self)
         
         # Scene management
         self.scene_manager = SceneManager(self)
@@ -206,6 +210,13 @@ class Game(ShowBase):
                 "keyboard_local": {"up": "", "down": "", "left": "", "right": "", "action": "", "sit_pause": ""},
             },
             "locale": "en",
+            "multiplayer": {
+                "enabled": True,
+                "default_port": 17777,
+                "tick_rate_hz": 20,
+                "connect_timeout_sec": 10,
+                "minigame_sync_hz": 10,
+            },
         }
     
     def _configure_panda3d(self):
@@ -441,7 +452,9 @@ class Game(ShowBase):
         """Setup all game scenes (lazy loading)"""
         # Main menu is loaded immediately (used on startup)
         main_menu = MainMenuScene(self)
-        main_menu.on_play = self.start_game
+        main_menu.on_play = self.start_game_solo
+        main_menu.on_host = self.start_host_from_menu
+        main_menu.on_join = self.start_join_from_menu
         main_menu.on_quit = self.quit_game
         self.scene_manager.add_scene("main_menu", main_menu)
         
@@ -581,8 +594,44 @@ class Game(ShowBase):
         
         return task.done
     
-    def start_game(self):
-        """Start the game (from menu)"""
+    def start_game_solo(self):
+        """Single-player: no network session."""
+        self.multiplayer.shutdown()
+        self.start_game()
+
+    def start_host_from_menu(self, port: int | None = None):
+        """Host coop session and wait for a client."""
+        ok, addr = self.multiplayer.start_host(port)
+        menu = self.scene_manager.loaded_scenes.get("main_menu")
+        if not ok:
+            if menu and hasattr(menu, "update_multiplayer_status"):
+                menu.update_multiplayer_status("host_failed", "")
+            return
+        if menu and hasattr(menu, "update_multiplayer_status"):
+            menu.update_multiplayer_status("host_waiting", addr)
+
+    def start_join_from_menu(self, host: str, port: int | None = None):
+        """Connect to host."""
+        if not self.multiplayer.join_host(host, port):
+            menu = self.scene_manager.loaded_scenes.get("main_menu")
+            if menu and hasattr(menu, "update_multiplayer_status"):
+                menu.update_multiplayer_status("join_failed", host)
+            return
+        menu = self.scene_manager.loaded_scenes.get("main_menu")
+        if menu and hasattr(menu, "update_multiplayer_status"):
+            menu.update_multiplayer_status("joining", host)
+
+    def switch_scene(self, scene_id: str, reason: str = "", **kwargs):
+        """Scene change with host authority in online coop."""
+        if self.multiplayer.is_host:
+            self.multiplayer.host_switch_scene(scene_id, reason, kwargs.get("monkey_mode"), kwargs)
+        elif self.multiplayer.is_client:
+            logger.debug("Client ignores local scene switch to %s", scene_id)
+        else:
+            self.scene_manager.switch_to(scene_id, self.player, **kwargs)
+
+    def start_game(self, multiplayer_already_started: bool = False):
+        """Start the game (from menu or network)."""
         logger.info("🎮 Starting game!")
         
         # First hide main menu
@@ -595,7 +644,11 @@ class Game(ShowBase):
         self.hud.show()
         
         # Switch to cave
-        self.scene_manager.switch_to("cave", self.player)
+        if self.multiplayer.is_host:
+            self.multiplayer.host_switch_scene("cave", "game_start")
+        else:
+            self.scene_manager.switch_to("cave", self.player)
+        self.multiplayer.on_enter_game()
         
         # Reset player state
         self.health_system.current_hp = self.health_system.max_hp
@@ -624,7 +677,22 @@ class Game(ShowBase):
     def quit_game(self):
         """Quit game"""
         logger.info("👋 Quitting game...")
+        self.multiplayer.shutdown()
         self.userExit()
+
+    def _multiplayer_return_to_menu(self, reason: str):
+        """Disconnect coop and return to main menu."""
+        self.in_game = False
+        self.hud.hide()
+        if self.dialog_box.is_visible:
+            self.dialog_box.hide()
+        self._exit_dialog_shown = False
+        self.multiplayer.session.reset_offline()
+        self.scene_manager.switch_to("main_menu", self.player)
+        menu = self.scene_manager.loaded_scenes.get("main_menu")
+        if menu and hasattr(menu, "update_multiplayer_status"):
+            menu.update_multiplayer_status("disconnected", reason)
+        logger.info("Returned to menu after multiplayer disconnect: %s", reason)
     
     def on_action_pressed(self):
         """Handle action button press (Space) - only for NPC interactions"""
@@ -688,7 +756,7 @@ class Game(ShowBase):
         scene = self.scene_manager.get_current_scene()
         scene_id = self.scene_manager.get_current_scene_name()
         if scene_id == "minigame" and scene and getattr(scene, "monkey_mode", None):
-            self.scene_manager.switch_to("minigame", self.player, scene.monkey_mode)
+            self.switch_scene("minigame", "restart", monkey_mode=scene.monkey_mode)
             self.health_system.current_hp = self.health_system.max_hp
             self.energy_system.current_energy = self.energy_system.max_energy
         else:
@@ -751,8 +819,107 @@ class Game(ShowBase):
         self.pause_menu.hide()
         self.in_game = False
         self.hud.hide()
+        self.multiplayer.shutdown()
         self.scene_manager.switch_to("main_menu", self.player)
     
+    def _update_local_player_movement(self, dt: float, sitting: bool) -> None:
+        """Keyboard / BrainLink movement for the local player only."""
+        move_dir = (0, 0) if sitting else self.input_manager.get_movement()
+
+        if not hasattr(self, '_movement_debug_counter'):
+            self._movement_debug_counter = 0
+        self._movement_debug_counter += 1
+
+        movement_source = self.input_manager.get_movement_source()
+        is_brainlink = movement_source == MOVEMENT_SOURCE_BRAINLINK
+        brainlink_speed_mult = 1.0
+        if is_brainlink and move_dir != (0, 0):
+            _, _, conf, _ = self.input_manager.get_ml_display_info()
+            bl_cfg = self.game_config.get("brainlink", {})
+            min_c = bl_cfg.get("min_confidence", 0.25)
+            full_c = bl_cfg.get("full_confidence", 0.7)
+            if conf < min_c:
+                move_dir = (0, 0)
+                brainlink_speed_mult = 0.0
+            elif conf >= full_c:
+                brainlink_speed_mult = 1.0
+            else:
+                brainlink_speed_mult = (conf - min_c) / (full_c - min_c) if full_c > min_c else 1.0
+            if move_dir != (0, 0) and self._movement_debug_counter % 60 == 0:
+                logger.info(
+                    "🎮 Game: [BrainLink] movement - dir=(%.2f, %.2f), conf=%.2f, speed_mult=%.2f",
+                    move_dir[0], move_dir[1], conf, brainlink_speed_mult,
+                )
+
+        if move_dir == (0, 0):
+            return
+
+        current_scene = self.scene_manager.get_current_scene()
+        should_spend_energy = movement_source == MOVEMENT_SOURCE_KEYBOARD
+        if should_spend_energy:
+            if self.energy_system.spend(self.move_cost * dt):
+                bounds = None
+                if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
+                    bounds = current_scene.MOVEMENT_BOUNDS
+                self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
+        else:
+            effective_speed = self.player_speed * brainlink_speed_mult
+            bounds = None
+            if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
+                bounds = current_scene.MOVEMENT_BOUNDS
+            self.player.move(move_dir[0], move_dir[1], dt, effective_speed, bounds, current_scene)
+
+    def _update_scene_exits(self) -> None:
+        """Host/offline: automatic exits. Client waits for scene_change."""
+        if self.multiplayer.should_client_skip_exits():
+            return
+        if self.dialog_box.is_visible or self._exit_dialog_shown:
+            if self._exit_dialog_shown:
+                current_scene = self.scene_manager.get_current_scene()
+                if current_scene:
+                    player_pos = self.player.get_position()
+                    exit_info = current_scene.check_exits(player_pos)
+                    if not exit_info:
+                        self._exit_dialog_shown = False
+            return
+
+        current_scene = self.scene_manager.get_current_scene()
+        if not current_scene:
+            return
+        player_pos = self.player.get_position()
+        exit_info = current_scene.check_exits(player_pos)
+        if not exit_info:
+            return
+        target_scene = exit_info.get("target_scene")
+        if not target_scene:
+            return
+        logger.info(
+            "🚪 Player entered exit: %s, transitioning to %s",
+            exit_info.get('name', 'unknown'),
+            target_scene,
+        )
+        if target_scene == "minigame":
+            father = None
+            for npc_obj in current_scene.npcs:
+                if npc_obj.name == "Father":
+                    father = npc_obj
+                    break
+            if father:
+                if not self._exit_dialog_shown:
+                    exit_dialog = resolve_dialog(father.exit_dialog)
+                    exit_dialog["options"] = [
+                        (t("npc.father.play_minigame"), self._on_father_agrees_to_minigame)
+                    ]
+                    self.dialog_box.show(father, exit_dialog)
+                    self._exit_dialog_shown = True
+                    logger.info("Father intercepted exit attempt!")
+            else:
+                self._show_minigame_position_dialog()
+                self._exit_dialog_shown = True
+        else:
+            self.switch_scene(target_scene, exit_info.get("name", ""))
+            logger.info("✅ Transitioned to %s", target_scene)
+
     def update(self, task):
         """Main game update loop"""
         dt = globalClock.getDt()
@@ -774,6 +941,8 @@ class Game(ShowBase):
         
         # Update input
         self.input_manager.update(dt)
+
+        self.multiplayer.update(dt)
         
         # При диалоге или паузе — сбросить весь ввод, чтобы движение не «залипало»
         if self.dialog_box.is_visible or self.pause_menu.is_visible:
@@ -826,111 +995,8 @@ class Game(ShowBase):
         
         # Process movement (only if in game and not in dialog)
         if self.in_game and not self.dialog_box.is_visible:
-            # When sitting (Space held), no movement
-            move_dir = (0, 0) if sitting else self.input_manager.get_movement()
-            
-            # Debug logging for BrainLink movement
-            if not hasattr(self, '_movement_debug_counter'):
-                self._movement_debug_counter = 0
-            self._movement_debug_counter += 1
-            
-            movement_source = self.input_manager.get_movement_source()
-            is_brainlink = movement_source == MOVEMENT_SOURCE_BRAINLINK
-            # BrainLink speed scale by confidence: below min = no move, min..full = limited speed, >= full = max speed
-            brainlink_speed_mult = 1.0
-            if is_brainlink and move_dir != (0, 0):
-                _, _, conf, _ = self.input_manager.get_ml_display_info()
-                bl_cfg = self.game_config.get("brainlink", {})
-                min_c = bl_cfg.get("min_confidence", 0.25)
-                full_c = bl_cfg.get("full_confidence", 0.7)
-                if conf < min_c:
-                    move_dir = (0, 0)
-                    brainlink_speed_mult = 0.0
-                elif conf >= full_c:
-                    brainlink_speed_mult = 1.0
-                else:
-                    brainlink_speed_mult = (conf - min_c) / (full_c - min_c) if full_c > min_c else 1.0
-                if move_dir != (0, 0) and self._movement_debug_counter % 60 == 0:
-                    logger.info(f"🎮 Game: [BrainLink] movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f}), conf={conf:.2f}, speed_mult={brainlink_speed_mult:.2f}")
-            
-            if move_dir != (0, 0):
-                # Get current scene for movement restrictions
-                current_scene = self.scene_manager.get_current_scene()
-                
-                # Only spend energy when movement is from keyboard (not BrainLink)
-                should_spend_energy = movement_source == MOVEMENT_SOURCE_KEYBOARD
-                if self._movement_debug_counter % 60 == 0 and movement_source == MOVEMENT_SOURCE_KEYBOARD:
-                    logger.info(f"🎮 Game: [Keyboard] movement - dir=({move_dir[0]:.2f}, {move_dir[1]:.2f})")
-                
-                if should_spend_energy:
-                    # Try to spend energy (only for keyboard movement)
-                    if self.energy_system.spend(self.move_cost * dt):
-                        bounds = None
-                        if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
-                            bounds = current_scene.MOVEMENT_BOUNDS
-                        self.player.move(move_dir[0], move_dir[1], dt, self.player_speed, bounds, current_scene)
-                else:
-                    # BrainLink movement: speed scaled by confidence (min_confidence..full_confidence)
-                    effective_speed = self.player_speed * brainlink_speed_mult
-                    bounds = None
-                    if current_scene and hasattr(current_scene, 'MOVEMENT_BOUNDS'):
-                        bounds = current_scene.MOVEMENT_BOUNDS
-                    if self._movement_debug_counter % 60 == 0:
-                        logger.info(f"🎮 Game: [BrainLink] movement - speed={effective_speed:.2f} (mult={brainlink_speed_mult:.2f})")
-                    self.player.move(move_dir[0], move_dir[1], dt, effective_speed, bounds, current_scene)
-            
-            # Check for automatic scene transitions (exits work automatically)
-            # Only check if dialog is not visible (to prevent spam)
-            if not self.dialog_box.is_visible and not self._exit_dialog_shown:
-                current_scene = self.scene_manager.get_current_scene()
-                if current_scene:
-                    player_pos = self.player.get_position()
-                    exit_info = current_scene.check_exits(player_pos)
-                    if exit_info:
-                        target_scene = exit_info.get("target_scene")
-                        if target_scene:
-                            logger.info(f"🚪 Player entered exit: {exit_info.get('name', 'unknown')}, transitioning to {target_scene}")
-                            
-                            # Special handling for minigame exit: father intercepts!
-                            if target_scene == "minigame":
-                                # Father always intercepts when trying to exit cave
-                                father = None
-                                for npc_obj in current_scene.npcs:
-                                    if npc_obj.name == "Father":
-                                        father = npc_obj
-                                        break
-                                
-                                if father:
-                                    # Only show dialog if it's not already shown
-                                    if not self._exit_dialog_shown:
-                                        # Use father's exit_dialog, but update callback
-                                        exit_dialog = resolve_dialog(father.exit_dialog)
-                                        exit_dialog["options"] = [
-                                            (t("npc.father.play_minigame"), self._on_father_agrees_to_minigame)
-                                        ]
-                                        self.dialog_box.show(father, exit_dialog)
-                                        self._exit_dialog_shown = True  # Mark that dialog was shown
-                                        logger.info("Father intercepted exit attempt! Showing exit dialog with Play Minigame option")
-                                    else:
-                                        logger.debug("Father exit dialog already shown, skipping")
-                                else:
-                                    # Fallback: show position dialog directly
-                                    logger.warning("Father not found, showing position dialog directly")
-                                    self._show_minigame_position_dialog()
-                                    self._exit_dialog_shown = True
-                            else:
-                                # Normal scene transition
-                                self.scene_manager.switch_to(target_scene, self.player)
-                                logger.info(f"✅ Transitioned to {target_scene}")
-            else:
-                # Reset exit dialog flag if player moved away from exit
-                if self._exit_dialog_shown:
-                    current_scene = self.scene_manager.get_current_scene()
-                    if current_scene:
-                        player_pos = self.player.get_position()
-                        exit_info = current_scene.check_exits(player_pos)
-                        if not exit_info:  # Player moved away from exit
-                            self._exit_dialog_shown = False
+            self._update_local_player_movement(dt, sitting)
+            self._update_scene_exits()
         
         # Update HUD (only in game)
         if self.in_game:
@@ -1027,7 +1093,7 @@ class Game(ShowBase):
         # Store mode for scene manager
         self._pending_minigame_position = monkey_mode
         # Use scene manager to switch (it will handle lazy loading)
-        self.scene_manager.switch_to("minigame", self.player, monkey_mode)
+        self.switch_scene("minigame", "dialog", monkey_mode=monkey_mode)
     
     def cleanup(self):
         """Cleanup on exit"""

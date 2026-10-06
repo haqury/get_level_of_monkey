@@ -7,6 +7,8 @@ from src.entities.npc import Mother
 
 logger = logging.getLogger(__name__)
 
+MULTIPLAYER_SPAWN = [(10.0, 0.0), (6.0, 0.0)]
+
 
 class KitchenScene(BaseScene):
     """Кухня"""

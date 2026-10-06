@@ -61,6 +61,8 @@ class MainMenuScene(BaseScene):
         
         # Callbacks
         self.on_play = None
+        self.on_host = None
+        self.on_join = None
         self.on_quit = None
         
         # Background elements
@@ -175,7 +177,8 @@ class MainMenuScene(BaseScene):
         _menu_btn_h = 0.045
         _menu_btn_step = _menu_btn_h * 2 + 0.02
         _menu_play_z = -0.28
-        _menu_settings_z = _menu_play_z - _menu_btn_step
+        _menu_network_z = _menu_play_z - _menu_btn_step
+        _menu_settings_z = _menu_network_z - _menu_btn_step
         _menu_brainlink_z = _menu_settings_z - _menu_btn_step
         _menu_quit_z = _menu_brainlink_z - _menu_btn_step
         _menu_btn_frame = (-_menu_btn_w, _menu_btn_w, -_menu_btn_h, _menu_btn_h)
@@ -191,9 +194,22 @@ class MainMenuScene(BaseScene):
             text_font=font
         )
         self.play_btn['state'] = 'disabled'  # Disabled until BrainLink ready
-        # Apply font to all text components
         if font:
             self._apply_font_to_button(self.play_btn, font)
+
+        self.network_game_btn = DirectButton(
+            text=t("menu.network_game"),
+            text_scale=0.028,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.25, 0.45, 0.65, 1),
+            frameSize=_menu_btn_frame,
+            pos=(0, 0, _menu_network_z),
+            command=self._on_network_game_clicked,
+            text_font=font,
+        )
+        self.network_game_btn['state'] = 'disabled'
+        if font:
+            self._apply_font_to_button(self.network_game_btn, font)
 
         # Player name input
         player_name = (self.base.game_config.get("player", {}).get("name") or t("menu.default_player_name")) if hasattr(self.base, 'game_config') else t("menu.default_player_name")
@@ -293,6 +309,7 @@ class MainMenuScene(BaseScene):
         # Settings panels (hidden by default)
         self._create_settings_panel(font)
         self._create_brainlink_settings_panel(font)
+        self._create_multiplayer_panel(font)
         
         # Hide all initially
         self._hide_all()
@@ -307,6 +324,10 @@ class MainMenuScene(BaseScene):
         self.subtitle.hide()
         self.status_frame.hide()
         self.play_btn.hide()
+        if hasattr(self, "network_game_btn"):
+            self.network_game_btn.hide()
+        if hasattr(self, "multiplayer_frame"):
+            self.multiplayer_frame.hide()
         self.back_to_game_btn.hide()
         if hasattr(self, 'player_name_label'):
             self.player_name_label.hide()
@@ -332,6 +353,8 @@ class MainMenuScene(BaseScene):
         self.subtitle.show()
         self.status_frame.show()
         self._update_from_pause_buttons()
+        if hasattr(self, "network_game_btn"):
+            self.network_game_btn.show()
         if hasattr(self, 'player_name_label'):
             self.player_name_label.show()
         if hasattr(self, 'player_name_entry'):
@@ -347,9 +370,13 @@ class MainMenuScene(BaseScene):
         """Show Play or Back to game depending on whether we came from pause."""
         if getattr(self.base, "_from_pause_settings", False):
             self.play_btn.hide()
+            if hasattr(self, "network_game_btn"):
+                self.network_game_btn.hide()
             self.back_to_game_btn.show()
         else:
             self.play_btn.show()
+            if hasattr(self, "network_game_btn"):
+                self.network_game_btn.show()
             self.back_to_game_btn.hide()
 
     def _on_back_to_game_clicked(self):
@@ -396,17 +423,219 @@ class MainMenuScene(BaseScene):
         """Enable play button"""
         self.play_btn['state'] = 'normal'
         self.play_btn['frameColor'] = (0.2, 0.8, 0.2, 1)
+        if hasattr(self, "network_game_btn"):
+            self.network_game_btn['state'] = 'normal'
+        if hasattr(self, "host_btn"):
+            self.host_btn['state'] = 'normal'
+        if hasattr(self, "join_btn"):
+            self.join_btn['state'] = 'normal'
     
     def disable_play_button(self):
         """Disable play button"""
         self.play_btn['state'] = 'disabled'
         self.play_btn['frameColor'] = (0.3, 0.3, 0.3, 1)
+        if hasattr(self, "network_game_btn"):
+            self.network_game_btn['state'] = 'disabled'
+        if hasattr(self, "host_btn"):
+            self.host_btn['state'] = 'disabled'
+        if hasattr(self, "join_btn"):
+            self.join_btn['state'] = 'disabled'
+
+    def _read_port(self) -> int:
+        try:
+            return int((self.mp_port_entry.get() or "17777").strip())
+        except ValueError:
+            return 17777
+
+    def update_multiplayer_status(self, phase: str, detail: str = "") -> None:
+        """Update BrainLink status area for coop lobby / disconnect."""
+        if phase == "host_waiting":
+            self.update_brainlink_status(
+                t("menu.mp_host_waiting", addr=detail),
+                t("menu.host_ip") + f": {detail}",
+                (0.5, 0.85, 1.0, 1),
+            )
+        elif phase == "connected":
+            self.update_brainlink_status(
+                t("menu.mp_connected", name=detail),
+                "",
+                (0.2, 1.0, 0.5, 1),
+            )
+        elif phase == "waiting_host":
+            self.update_brainlink_status(
+                t("menu.mp_waiting_host", name=detail),
+                "",
+                (0.5, 0.85, 1.0, 1),
+            )
+        elif phase == "join_failed":
+            self.update_brainlink_status(
+                t("menu.mp_join_failed", host=detail),
+                "",
+                (1.0, 0.4, 0.3, 1),
+            )
+        elif phase == "host_failed":
+            self.update_brainlink_status(t("menu.mp_host_failed"), "", (1.0, 0.4, 0.3, 1))
+        elif phase == "joining":
+            self.update_brainlink_status(
+                t("menu.mp_joining", host=detail),
+                "",
+                (1.0, 1.0, 0.5, 1),
+            )
+        elif phase == "disconnected":
+            self.update_brainlink_status(
+                t("menu.mp_disconnected", reason=detail),
+                "",
+                (1.0, 0.5, 0.3, 1),
+            )
     
     def _on_play_clicked(self):
         """Handle play button click"""
         logger.info("Play button clicked")
+        self._apply_player_name_from_entry()
         if self.on_play:
             self.on_play()
+
+    def _create_multiplayer_panel(self, font):
+        """Sub-menu: host or join (hidden until «Network game»)."""
+        default_port = 17777
+        if hasattr(self.base, "game_config"):
+            default_port = int(
+                self.base.game_config.get("multiplayer", {}).get("default_port", 17777)
+            )
+        _btn_w = 0.22
+        _btn_h = 0.04
+        _btn_frame = (-_btn_w, _btn_w, -_btn_h, _btn_h)
+
+        self.multiplayer_frame = DirectFrame(
+            frameColor=(0.05, 0.05, 0.12, 0.92),
+            frameSize=(-0.42, 0.42, -0.32, 0.32),
+            pos=(0, 0, 0.0),
+            borderWidth=(0.008, 0.008),
+        )
+        self.mp_title = DirectLabel(
+            text=t("menu.network_game"),
+            text_scale=0.045,
+            text_fg=(0.9, 0.85, 1.0, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(0, 0, 0.24),
+            parent=self.multiplayer_frame,
+            text_font=font,
+            text_align=TextNode.ACenter,
+        )
+        self.mp_host_label = DirectLabel(
+            text=t("menu.host_ip") + ":",
+            text_scale=0.032,
+            text_fg=(0.85, 0.85, 0.9, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.32, 0, 0.12),
+            parent=self.multiplayer_frame,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        self.mp_host_entry = DirectEntry(
+            scale=0.032,
+            initialText="127.0.0.1",
+            numLines=1,
+            width=12,
+            pos=(-0.05, 0, 0.12),
+            parent=self.multiplayer_frame,
+            frameColor=(0.3, 0.35, 0.45, 1),
+            borderWidth=(0.008, 0.008),
+        )
+        self.mp_port_label = DirectLabel(
+            text=t("menu.port") + ":",
+            text_scale=0.032,
+            text_fg=(0.85, 0.85, 0.9, 1),
+            frameColor=(0, 0, 0, 0),
+            pos=(-0.32, 0, 0.04),
+            parent=self.multiplayer_frame,
+            text_font=font,
+            text_align=TextNode.ALeft,
+        )
+        self.mp_port_entry = DirectEntry(
+            scale=0.032,
+            initialText=str(default_port),
+            numLines=1,
+            width=6,
+            pos=(-0.05, 0, 0.04),
+            parent=self.multiplayer_frame,
+            frameColor=(0.3, 0.35, 0.45, 1),
+            borderWidth=(0.008, 0.008),
+        )
+        self.host_btn = DirectButton(
+            text=t("menu.host"),
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.25, 0.55, 0.35, 1),
+            frameSize=_btn_frame,
+            pos=(0, 0, -0.06),
+            parent=self.multiplayer_frame,
+            command=self._on_host_clicked,
+            text_font=font,
+        )
+        self.host_btn['state'] = 'disabled'
+        if font:
+            self._apply_font_to_button(self.host_btn, font)
+
+        self.join_btn = DirectButton(
+            text=t("menu.join"),
+            text_scale=0.032,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.45, 0.35, 0.65, 1),
+            frameSize=_btn_frame,
+            pos=(0, 0, -0.14),
+            parent=self.multiplayer_frame,
+            command=self._on_join_clicked,
+            text_font=font,
+        )
+        self.join_btn['state'] = 'disabled'
+        if font:
+            self._apply_font_to_button(self.join_btn, font)
+
+        self.mp_back_btn = DirectButton(
+            text=t("menu.mp_back"),
+            text_scale=0.03,
+            text_fg=(1, 1, 1, 1),
+            frameColor=(0.35, 0.35, 0.4, 1),
+            frameSize=_btn_frame,
+            pos=(0, 0, -0.24),
+            parent=self.multiplayer_frame,
+            command=self._close_multiplayer_panel,
+            text_font=font,
+        )
+        if font:
+            self._apply_font_to_button(self.mp_back_btn, font)
+        self.multiplayer_frame.hide()
+
+    def _on_network_game_clicked(self):
+        self._open_multiplayer_panel()
+
+    def _open_multiplayer_panel(self):
+        if hasattr(self, "settings_frame") and self.settings_frame.isHidden() is False:
+            self.settings_frame.hide()
+        if hasattr(self, "brainlink_settings_frame") and self.brainlink_settings_frame.isHidden() is False:
+            self.brainlink_settings_frame.hide()
+        self.multiplayer_frame.show()
+        self.status_frame.show()
+
+    def _close_multiplayer_panel(self):
+        if hasattr(self, "multiplayer_frame"):
+            self.multiplayer_frame.hide()
+
+    def _on_host_clicked(self):
+        logger.info("Host button clicked")
+        self._apply_player_name_from_entry()
+        self._close_multiplayer_panel()
+        if self.on_host:
+            self.on_host(self._read_port())
+
+    def _on_join_clicked(self):
+        logger.info("Join button clicked")
+        self._apply_player_name_from_entry()
+        self._close_multiplayer_panel()
+        host = (self.mp_host_entry.get() or "127.0.0.1").strip()
+        if self.on_join:
+            self.on_join(host, self._read_port())
     
     def _on_quit_clicked(self):
         """Handle quit button click"""
@@ -2117,6 +2346,10 @@ class MainMenuScene(BaseScene):
 
     def _hide_main_menu_for_settings(self):
         self.play_btn.hide()
+        if hasattr(self, "network_game_btn"):
+            self.network_game_btn.hide()
+        if hasattr(self, "multiplayer_frame"):
+            self.multiplayer_frame.hide()
         self.back_to_game_btn.hide()
         self.settings_btn.hide()
         if hasattr(self, "brainlink_settings_btn"):

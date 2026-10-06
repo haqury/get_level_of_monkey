@@ -37,6 +37,8 @@ class Player(DirectObject):
         self.facing_direction = "down"  # up, down, left, right
         self.is_moving = False
         self.is_sitting = False  # True when holding Space (sitting, 2x energy regen)
+        self.is_local = True
+        self.player_id = 0
         
         logger.info(f"Player created at {pos}")
     

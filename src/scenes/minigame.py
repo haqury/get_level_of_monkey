@@ -15,6 +15,8 @@ CLEARING_HALF_W = 30.0   # clearing 60x30, half width
 CLEARING_HALF_H = 15.0   # half height
 ROAD_WIDTH = 2.5         # road strip width; player cannot step on road
 
+MULTIPLAYER_SPAWN = [(0.0, 0.0), (2.0, 0.0)]
+
 
 class Monkey:
     """Обезьяна в мини-игре"""
@@ -346,6 +348,10 @@ class MinigameScene(BaseScene):
         self.bushes = []  # Кусты
         self.roads = []   # Road strips where monkeys walk (player cannot step on)
         
+        self._net_proxy_monkeys = []
+        self._net_proxy_poops = []
+        self._client_hp_mirror = None
+
         # Create background
         self._create_background()
         
@@ -648,6 +654,88 @@ class MinigameScene(BaseScene):
             self.monkeys.append(monkey)
         
         logger.info(f"Spawned group of {count} monkeys from forest (mode: {self.monkey_mode}, total: {len(self.monkeys)})")
+
+    def _multiplayer_client(self) -> bool:
+        mp = getattr(self.base, 'multiplayer', None)
+        return bool(mp and mp.is_client)
+
+    def _multiplayer_host_online(self) -> bool:
+        mp = getattr(self.base, 'multiplayer', None)
+        return bool(mp and mp.is_host)
+
+    def _clear_net_proxies(self) -> None:
+        for node in self._net_proxy_monkeys + self._net_proxy_poops:
+            if node:
+                node.removeNode()
+        self._net_proxy_monkeys = []
+        self._net_proxy_poops = []
+
+    def build_network_snapshot(self) -> dict:
+        monkeys = [
+            {"x": round(m.position.x, 2), "z": round(m.position.z, 2), "age": m.age}
+            for m in self.monkeys
+        ]
+        poops = [
+            {"x": round(p.position.x, 2), "z": round(p.position.z, 2)}
+            for p in self.poops if p.is_alive
+        ]
+        hp = {"0": self.base.health_system.current_hp}
+        mp = getattr(self.base, 'multiplayer', None)
+        if mp and mp.remote_player and self._client_hp_mirror is not None:
+            hp["1"] = self._client_hp_mirror
+        return {
+            "game_time": round(self.game_time, 2),
+            "monkeys": monkeys,
+            "poops": poops,
+            "hp": hp,
+            "game_over": self.is_game_over,
+        }
+
+    def apply_network_snapshot(self, msg: dict) -> None:
+        if not self._multiplayer_client():
+            return
+        self.game_time = float(msg.get("game_time", self.game_time))
+        if hasattr(self.base, 'hud'):
+            self.base.hud.update_survival_time(self.game_time)
+        hp_map = msg.get("hp") or {}
+        if "1" in hp_map:
+            self.base.health_system.current_hp = int(hp_map["1"])
+        if msg.get("game_over"):
+            self.is_game_over = True
+        self._sync_net_proxies(msg.get("monkeys", []), msg.get("poops", []))
+
+    def _sync_net_proxies(self, monkeys_data, poops_data) -> None:
+        self._clear_net_proxies()
+        colors = [
+            (0.8, 0.6, 0.3, 1.0),
+            (0.6, 0.4, 0.2, 1.0),
+            (0.5, 0.3, 0.1, 1.0),
+            (0.3, 0.2, 0.1, 1.0),
+        ]
+        for m in monkeys_data:
+            age = int(m.get("age", 1))
+            age = max(1, min(4, age))
+            cm = CardMaker("net_monkey")
+            cm.setFrame(-0.5, 0.5, -0.5, 0.5)
+            node = self.base.render.attachNewNode(cm.generate())
+            node.setPos(float(m.get("x", 0)), 1.0, float(m.get("z", 0)))
+            node.setColor(*colors[age - 1])
+            node.setBillboardPointEye()
+            node.setBin("fixed", 30)
+            node.setDepthTest(False)
+            node.setDepthWrite(False)
+            self._net_proxy_monkeys.append(node)
+        for p in poops_data:
+            cm = CardMaker("net_poop")
+            cm.setFrame(-0.25, 0.25, -0.25, 0.25)
+            node = self.base.render.attachNewNode(cm.generate())
+            node.setPos(float(p.get("x", 0)), 1.0, float(p.get("z", 0)))
+            node.setColor(0.4, 0.25, 0.13, 1.0)
+            node.setBillboardPointEye()
+            node.setBin("fixed", 40)
+            node.setDepthTest(False)
+            node.setDepthWrite(False)
+            self._net_proxy_poops.append(node)
     
     def enter(self, player, monkey_mode: str = "NorthSouth"):
         """Enter minigame
@@ -663,17 +751,21 @@ class MinigameScene(BaseScene):
         # Reset game state
         self.game_time = 0
         self.is_game_over = False
+        self._client_hp_mirror = self.base.health_system.max_hp
+        self._clear_net_proxies()
         
-        # Player always spawns in center
-        player.set_position(0, 0)
+        # Player spawn (multiplayer uses Game/controller spawn points)
+        if not getattr(self.base, 'multiplayer', None) or not self.base.multiplayer.is_online:
+            player.set_position(0, 0)
         
         # Create clearing, road, and bushes (always same - center clearing)
         self._create_clearing_and_bushes(monkey_mode)
         
-        # Spawn: first group (1 monkey); next group only when current group all reached forest
+        # Spawn: first group (1 monkey); host sim only in multiplayer
         self._spawn_group_size = 1
         self._cap_5_until_time = None
-        self._spawn_group(1)  # First group: one monkey
+        if not self._multiplayer_client():
+            self._spawn_group(1)  # First group: one monkey
         
         # Show background (lowest layer)
         if self.background:
@@ -714,6 +806,8 @@ class MinigameScene(BaseScene):
         """Update minigame"""
         if self.is_game_over:
             return
+        if self._multiplayer_client():
+            return
         
         # Update game time
         self.game_time += dt
@@ -753,10 +847,15 @@ class MinigameScene(BaseScene):
             self._spawn_group(min(self._spawn_group_size, 5))
         
         # Update poops and check collisions
+        mp = getattr(self.base, 'multiplayer', None)
+        remote_pos = None
+        if mp and mp.remote_player:
+            remote_pos = mp.remote_player.get_position()
+
         for poop in self.poops[:]:
             poop.update(dt)
             
-            # Check collision with player
+            # Check collision with local (host) player
             if poop.check_collision(player_pos):
                 logger.info("💥 Hit by poop!")
                 self.base.health_system.take_damage(1)
@@ -770,6 +869,15 @@ class MinigameScene(BaseScene):
                 if not self.base.health_system.is_alive():
                     self._game_over()
                     self._send_game_event("player_died")
+            elif remote_pos and self._multiplayer_host_online() and poop.check_collision(remote_pos):
+                logger.info("💥 Remote player hit by poop (host sim)")
+                if self._client_hp_mirror is None:
+                    self._client_hp_mirror = self.base.health_system.max_hp
+                self._client_hp_mirror = max(0, self._client_hp_mirror - 1)
+                self.poops.remove(poop)
+                poop.cleanup()
+                if self._client_hp_mirror <= 0:
+                    logger.info("Remote player game over (host sim)")
             
             # Remove dead poops (player dodged!)
             elif not poop.is_alive:

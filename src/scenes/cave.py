@@ -7,6 +7,8 @@ from src.entities.npc import Father
 
 logger = logging.getLogger(__name__)
 
+MULTIPLAYER_SPAWN = [(0.0, 0.0), (-4.0, 0.0)]
+
 
 class CaveScene(BaseScene):
     """Пещера - начальная локация"""

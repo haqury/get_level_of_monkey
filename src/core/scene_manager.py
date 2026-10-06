@@ -111,6 +111,9 @@ class SceneManager:
         """Auto-save game state"""
         if not hasattr(self.base, 'save_system') or not hasattr(self.base, 'progression_system'):
             return
+        mp = getattr(self.base, 'multiplayer', None)
+        if mp and mp.is_client:
+            return
         
         try:
             save_data = {
